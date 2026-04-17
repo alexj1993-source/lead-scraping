@@ -5,7 +5,7 @@ import { createLogger } from '../common/logger';
 
 const logger = createLogger('reply-sync-processor');
 
-@Processor('reply:sync')
+@Processor('reply-sync')
 export class ReplySyncProcessor extends WorkerHost {
   constructor(private readonly uploadService: UploadService) {
     super();

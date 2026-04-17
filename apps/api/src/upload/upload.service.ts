@@ -3,6 +3,8 @@ import { prisma } from '@hyperscale/database';
 import { createLogger } from '../common/logger';
 import { BudgetService } from '../budget/budget.service';
 import { QueueService } from '../queues/queue.service';
+import { StatsService } from '../stats/stats.service';
+import { loadTemplate, toInstantlyFormat } from './sequence-builder';
 
 const INSTANTLY_BASE_URL = 'https://api.instantly.ai';
 const MAX_RETRIES = 3;
@@ -23,6 +25,7 @@ export class UploadService {
   constructor(
     private readonly budgetService: BudgetService,
     private readonly queueService: QueueService,
+    private readonly statsService: StatsService,
   ) {}
 
   async uploadLead(
@@ -70,14 +73,12 @@ export class UploadService {
     const formatted = this.formatLeadForInstantly(lead);
 
     try {
-      const result = await this.callInstantlyApi('POST', '/api/v1/lead/add', {
-        api_key: process.env.INSTANTLY_API_KEY,
+      const result = await this.callInstantlyApi('POST', '/api/v2/leads', {
         campaign_id: campaign.instantlyCampaignId,
-        skip_if_in_workspace: false,
         ...formatted,
       });
 
-      const instantlyLeadId = result?.lead_id ?? result?.id ?? undefined;
+      const instantlyLeadId = result?.id ?? result?.lead_id ?? undefined;
 
       await prisma.lead.update({
         where: { id: leadId },
@@ -88,6 +89,8 @@ export class UploadService {
           instantlyLeadId,
         },
       });
+
+      await this.trackUploadStats(lead.source);
 
       this.logger.info(
         { leadId, instantlyLeadId, campaignId: campaign.instantlyCampaignId },
@@ -101,7 +104,13 @@ export class UploadService {
   }
 
   async bootstrapCampaign(source: string): Promise<string> {
-    const sequenceTemplate = await this.loadSequenceTemplate(source);
+    let steps;
+    try {
+      const rawSteps = loadTemplate(source);
+      steps = toInstantlyFormat(rawSteps);
+    } catch {
+      steps = null;
+    }
 
     const campaignRes = await this.callInstantlyApi('POST', '/api/v2/campaigns', {
       name: `Hyperscale - ${source} - Auto`,
@@ -110,15 +119,15 @@ export class UploadService {
 
     const instantlyCampaignId = campaignRes.id;
 
-    if (sequenceTemplate?.steps) {
-      for (const step of sequenceTemplate.steps) {
+    if (steps) {
+      for (const step of steps) {
         await this.callInstantlyApi(
           'POST',
           `/api/v2/campaigns/${instantlyCampaignId}/sequences`,
           {
             subject: step.subject,
             body: step.body,
-            delay_days: step.delayDays ?? 0,
+            delay_days: step.delay_days,
           },
         );
       }
@@ -194,7 +203,7 @@ export class UploadService {
             data: { instantlyCampaignId: newId },
           });
           return { healthy: true, detail: `Campaign re-bootstrapped: ${newId}` };
-        } catch (bootstrapErr) {
+        } catch {
           return { healthy: false, detail: 'Campaign deleted and re-bootstrap failed' };
         }
       }
@@ -251,7 +260,7 @@ export class UploadService {
             },
           });
 
-          await this.queueService.addJob('reply:classify', {
+          await this.queueService.addJob('reply-classify', {
             replyId: lead.id,
             body: replyText,
             leadId: lead.id,
@@ -296,14 +305,17 @@ export class UploadService {
     if (personalization.icebreaker) {
       customVariables.icebreaker = String(personalization.icebreaker);
     }
-    if (lead.leadMagnetDescription) {
-      customVariables.leadMagnetDescription = String(lead.leadMagnetDescription);
-    }
     if (personalization.subjectLine) {
       customVariables.subjectLine = String(personalization.subjectLine);
     }
     if (personalization.angle) {
       customVariables.angle = String(personalization.angle);
+    }
+    if (lead.leadMagnetDescription) {
+      customVariables.leadMagnet = String(lead.leadMagnetDescription);
+    }
+    if (lead.source) {
+      customVariables.source = String(lead.source);
     }
 
     return {
@@ -313,6 +325,22 @@ export class UploadService {
       company_name: lead.companyName ?? undefined,
       custom_variables: Object.keys(customVariables).length > 0 ? customVariables : undefined,
     };
+  }
+
+  private async trackUploadStats(source: string): Promise<void> {
+    const today = new Date();
+    try {
+      await this.statsService.incrementStat(today, 'leadsUploaded');
+
+      const sourceField = source === 'FACEBOOK_ADS' || source === 'facebook_ads'
+        ? 'fbLeads'
+        : 'igLeads';
+      await this.statsService.incrementStat(today, sourceField);
+
+      await this.budgetService.trackUsage('instantly', 0);
+    } catch (err) {
+      this.logger.warn({ source, err }, 'Failed to track upload stats (non-fatal)');
+    }
   }
 
   private async handleUploadError(
@@ -346,10 +374,9 @@ export class UploadService {
     }
 
     this.logger.error({ leadId, err }, 'Instantly upload failed');
-    await this.queueService.addJob('remediate', {
-      leadId,
-      trigger: 'instantly_upload_failed',
-      context: { error: message, email: lead.email },
+    await prisma.lead.update({
+      where: { id: leadId },
+      data: { status: 'ERROR' },
     });
     return { success: false };
   }
@@ -384,13 +411,18 @@ export class UploadService {
         };
 
         if (method !== 'GET' && body) {
-          fetchOpts.body = JSON.stringify({ ...body, api_key: apiKey });
+          fetchOpts.body = JSON.stringify(body);
         }
 
         const response = await fetch(url.toString(), fetchOpts);
 
+        const retryAfter = response.headers.get('X-RateLimit-Reset')
+          ?? response.headers.get('Retry-After');
+
         if (response.status === 429) {
-          const backoff = INITIAL_BACKOFF_MS * Math.pow(2, attempt);
+          const backoff = retryAfter
+            ? Math.max(parseInt(retryAfter, 10) * 1000, INITIAL_BACKOFF_MS)
+            : INITIAL_BACKOFF_MS * Math.pow(2, attempt);
           this.logger.warn(
             { path, attempt, backoffMs: backoff },
             'Instantly rate limited, retrying',
@@ -425,41 +457,26 @@ export class UploadService {
   }
 
   private async getCampaignForLead(lead: any) {
-    const campaign = await prisma.campaign.findFirst({
+    const campaigns = await prisma.campaign.findMany({
       where: { source: lead.source, active: true },
-      orderBy: { name: 'asc' },
-    });
-    return campaign;
-  }
-
-  private async loadSequenceTemplate(source: string) {
-    const campaign = await prisma.campaign.findFirst({
-      where: { source: source as any, active: true },
-      select: { sequenceTemplate: true },
     });
 
-    if (campaign?.sequenceTemplate) {
-      return campaign.sequenceTemplate as any;
-    }
+    if (campaigns.length === 0) return null;
+    if (campaigns.length === 1) return campaigns[0];
 
-    return {
-      steps: [
-        {
-          subject: '{{subjectLine}}',
-          body: 'Hey {{first_name}},\n\n{{icebreaker}}\n\n{{angle}}\n\nWorth a quick chat?',
-          delayDays: 0,
-        },
-        {
-          subject: 'Re: {{subjectLine}}',
-          body: 'Hey {{first_name}}, just bumping this up. Figured it might have gotten buried.\n\nAny interest?',
-          delayDays: 3,
-        },
-        {
-          subject: 'Re: {{subjectLine}}',
-          body: '{{first_name}} - last shot on this. If the timing is off, no worries at all.\n\nJust let me know either way.',
-          delayDays: 5,
-        },
-      ],
-    };
+    // Load-balance: pick the campaign with the fewest uploaded leads
+    const withCounts = await Promise.all(
+      campaigns.map(async (c) => ({
+        campaign: c,
+        leadCount: c.instantlyCampaignId
+          ? await prisma.lead.count({
+              where: { instantlyCampaignId: c.instantlyCampaignId },
+            })
+          : 0,
+      })),
+    );
+
+    withCounts.sort((a, b) => a.leadCount - b.leadCount);
+    return withCounts[0].campaign;
   }
 }

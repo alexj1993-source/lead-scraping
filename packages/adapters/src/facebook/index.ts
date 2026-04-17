@@ -1,13 +1,13 @@
 import { prisma } from '@hyperscale/database';
-import type { BaseAdapter } from '../base.js';
-import { FacebookTier1Adapter } from './tier1.js';
-import { FacebookTier2Adapter } from './tier2.js';
-import { FacebookTier3Adapter } from './tier3.js';
+import type { BaseAdapter } from '../base';
+import { FacebookTier1Adapter } from './tier1';
+import { FacebookTier2Adapter } from './tier2';
+import { FacebookTier3Adapter } from './tier3';
 
-export { FacebookTier1Adapter } from './tier1.js';
-export { FacebookTier2Adapter } from './tier2.js';
-export { FacebookTier3Adapter } from './tier3.js';
-export { qualifyAd, type RawFacebookAd, type QualificationResult } from './qualify.js';
+export { FacebookTier1Adapter } from './tier1';
+export { FacebookTier2Adapter } from './tier2';
+export { FacebookTier3Adapter } from './tier3';
+export { qualifyAd, type RawFacebookAd, type QualificationResult } from './qualify';
 
 export async function getActiveFacebookAdapter(): Promise<BaseAdapter> {
   const config = await prisma.sourceConfig.findUnique({

@@ -36,11 +36,13 @@ enum LeadStatus {
   VALIDATED_VALID
   VALIDATED_INVALID
   PERSONALIZING
+  PERSONALIZED
   REVIEW_PENDING
   READY_TO_UPLOAD
   UPLOADED
   REPLIED
   BOOKED
+  UNSUBSCRIBED
   AUTO_REMEDIATING
   ESCALATED
   ERROR
@@ -115,8 +117,8 @@ model Lead {
   duplicates            Lead[]   @relation("Duplicates")
 
   neverbounceResult     EmailValidationResult?
-  zerobounceResult      EmailValidationResult?
-  zerobounceSubStatus   String?
+  bouncebanResult       EmailValidationResult?
+  bouncebanScore        Int?
   validatedAt           DateTime?
 
   personalization       Json?
@@ -132,6 +134,7 @@ model Lead {
   replyText             String?
   replyClassification   ReplyClassification?
   replyClassifiedAt     DateTime?
+  draftReply            Json?
   meetingBooked         Boolean  @default(false)
   meetingBookedAt       DateTime?
 
@@ -195,6 +198,7 @@ model Keyword {
   secondary     String?
   source        Source
   enabled       Boolean   @default(true)
+  labels        String[]  @default([])
   lastUsedAt    DateTime?
   totalYield    Int       @default(0)
   icpPassRate   Float     @default(0)
@@ -237,8 +241,8 @@ model SessionCredential {
 model EmailValidationCache {
   email       String                 @id
   neverbounce EmailValidationResult?
-  zerobounce  EmailValidationResult?
-  subStatus   String?
+  bounceban   EmailValidationResult?
+  bbScore     Int?
   validatedAt DateTime               @default(now())
 }
 
@@ -260,14 +264,17 @@ model ExaSearchCache {
 }
 
 model SourceConfig {
-  source         Source     @id
-  activeTier     SourceTier
-  tier1Config    Json?
-  tier2Config    Json?
-  tier3Config    Json?
-  autoTierSwitch Boolean   @default(true)
-  tierHealth     Json?
-  updatedAt      DateTime  @updatedAt
+  source              Source     @id
+  activeTier          SourceTier
+  tier1Config         Json?
+  tier2Config         Json?
+  tier3Config         Json?
+  autoTierSwitch      Boolean   @default(true)
+  tierHealth          Json?
+  enabled             Boolean   @default(true)
+  scheduleEnabled     Boolean   @default(false)
+  scheduleDailyTarget Int       @default(100)
+  updatedAt           DateTime  @updatedAt
 }
 
 model PaperclipAction {
@@ -395,4 +402,12 @@ model Inbox {
   updatedAt          DateTime     @updatedAt
 
   @@index([status, campaignId])
+}
+
+model Suppression {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  reason    String
+  source    String?
+  createdAt DateTime @default(now())
 }

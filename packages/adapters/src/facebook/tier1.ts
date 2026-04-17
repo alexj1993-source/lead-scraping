@@ -1,5 +1,5 @@
-import { BaseAdapter, type AdapterResult, type LeadInput } from '../base.js';
-import { qualifyAd, type RawFacebookAd } from './qualify.js';
+import { BaseAdapter, type AdapterResult, type LeadInput } from '../base';
+import { qualifyAd, type RawFacebookAd } from './qualify';
 import { icpConfig } from '@hyperscale/config';
 
 const FB_AD_LIBRARY_BASE = 'https://graph.facebook.com/v18.0/ads_archive';

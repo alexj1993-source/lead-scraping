@@ -5,7 +5,7 @@ const prisma = new PrismaClient();
 async function main() {
   // --- SourceConfig entries ---
   const sourceConfigs = [
-    { source: Source.FACEBOOK_ADS, activeTier: SourceTier.TIER_1_API },
+    { source: Source.FACEBOOK_ADS, activeTier: SourceTier.TIER_2_MANAGED },
     { source: Source.INSTAGRAM, activeTier: SourceTier.TIER_3_INHOUSE },
   ] as const;
 
@@ -47,7 +47,7 @@ async function main() {
     { provider: 'anthropic', monthlyCapUsd: 200 },
     { provider: 'exa', monthlyCapUsd: 100 },
     { provider: 'neverbounce', monthlyCapUsd: 50 },
-    { provider: 'zerobounce', monthlyCapUsd: 50 },
+    { provider: 'bounceban', monthlyCapUsd: 50 },
     { provider: 'instantly', monthlyCapUsd: 97 },
     { provider: 'scrapeowl', monthlyCapUsd: 30 },
   ];

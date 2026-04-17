@@ -2,6 +2,7 @@ import { Controller, Get, Put, Post, Body, BadRequestException } from '@nestjs/c
 import { prisma } from '@hyperscale/database';
 import { QueueService } from '../queues/queue.service';
 import { KeywordService } from '../keyword/keyword.service';
+import { OrchestratorService } from './orchestrator.service';
 import { createLogger } from '../common/logger';
 import type { Source } from '@hyperscale/types';
 
@@ -29,16 +30,12 @@ const DEFAULT_CONFIG: ScheduleConfig = {
   timezone: 'UTC',
 };
 
-const SOURCE_TO_QUEUE: Record<string, string> = {
-  FACEBOOK_ADS: 'scrape:facebook',
-  INSTAGRAM: 'scrape:instagram',
-};
-
 @Controller('schedule')
 export class ScheduleController {
   constructor(
     private readonly queue: QueueService,
     private readonly keyword: KeywordService,
+    private readonly orchestrator: OrchestratorService,
   ) {}
 
   @Get()
@@ -83,32 +80,7 @@ export class ScheduleController {
 
   @Post('run-now')
   async runNow(): Promise<{ success: boolean; jobsQueued: number }> {
-    const config = await this.getConfig();
-    if (!config.enabled) {
-      throw new BadRequestException('Pipeline is disabled');
-    }
-
-    let totalJobs = 0;
-    const sources: Array<{ key: string; source: Source }> = [
-      { key: 'FACEBOOK_ADS', source: 'facebook_ads' as Source },
-      { key: 'INSTAGRAM', source: 'instagram' as Source },
-    ];
-
-    for (const { key, source } of sources) {
-      const topKeywords = await this.keyword.getTopKeywords(source, 20);
-      const queueName = SOURCE_TO_QUEUE[key];
-
-      const jobs = topKeywords.map((kw) => ({
-        data: { keyword: kw.primary, maxResults: 100 },
-      }));
-
-      if (jobs.length > 0) {
-        await this.queue.addBulk(queueName, jobs);
-        totalJobs += jobs.length;
-        logger.info({ source: key, jobs: jobs.length }, 'Run-now scrape jobs queued');
-      }
-    }
-
-    return { success: true, jobsQueued: totalJobs };
+    logger.info('Manual run-now triggered — using forceRun (bypasses CMO)');
+    return this.orchestrator.forceRun();
   }
 }

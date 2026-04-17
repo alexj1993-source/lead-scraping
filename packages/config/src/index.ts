@@ -6,4 +6,5 @@ export {
 } from './banned-phrases';
 export { DEFAULT_BUDGETS, type BudgetConfig } from './budgets';
 export { tierThresholds } from './tier-thresholds';
-export { PERSONAS } from './personas.js';
+export { PERSONAS } from './personas';
+export { getSequenceTemplate, type SequenceStep } from './sequences';

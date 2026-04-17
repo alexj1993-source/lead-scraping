@@ -10,47 +10,53 @@ export class QueueService {
   private readonly queues = new Map<string, Queue>();
 
   constructor(
-    @InjectQueue('scrape:facebook') private scrapeFb: Queue,
-    @InjectQueue('scrape:instagram') private scrapeIg: Queue,
+    @InjectQueue('scrape-facebook') private scrapeFb: Queue,
+    @InjectQueue('scrape-instagram') private scrapeIg: Queue,
     @InjectQueue('enrich') private enrich: Queue,
     @InjectQueue('score') private score: Queue,
     @InjectQueue('dedup') private dedup: Queue,
     @InjectQueue('validate') private validate: Queue,
+    @InjectQueue('validate-neverbounce') private validateNb: Queue,
+    @InjectQueue('validate-bounceban') private validateBb: Queue,
     @InjectQueue('personalize') private personalize: Queue,
+    @InjectQueue('qa') private qa: Queue,
     @InjectQueue('upload') private upload: Queue,
-    @InjectQueue('reply:sync') private replySync: Queue,
-    @InjectQueue('reply:classify') private replyClassify: Queue,
+    @InjectQueue('reply-sync') private replySync: Queue,
+    @InjectQueue('reply-classify') private replyClassify: Queue,
     @InjectQueue('remediate') private remediate: Queue,
-    @InjectQueue('session:health-check') private sessionHealth: Queue,
-    @InjectQueue('session:auto-reauth') private sessionReauth: Queue,
-    @InjectQueue('paperclip:15min') private paperclip15: Queue,
-    @InjectQueue('paperclip:hourly') private paperclipHourly: Queue,
-    @InjectQueue('paperclip:daily') private paperclipDaily: Queue,
-    @InjectQueue('paperclip:weekly') private paperclipWeekly: Queue,
-    @InjectQueue('exa:search') private exaSearch: Queue,
-    @InjectQueue('keyword:score') private keywordScore: Queue,
-    @InjectQueue('stats:rollup') private statsRollup: Queue,
+    @InjectQueue('session-health-check') private sessionHealth: Queue,
+    @InjectQueue('session-auto-reauth') private sessionReauth: Queue,
+    @InjectQueue('paperclip-15min') private paperclip15: Queue,
+    @InjectQueue('paperclip-hourly') private paperclipHourly: Queue,
+    @InjectQueue('paperclip-daily') private paperclipDaily: Queue,
+    @InjectQueue('paperclip-weekly') private paperclipWeekly: Queue,
+    @InjectQueue('exa-search') private exaSearch: Queue,
+    @InjectQueue('keyword-score') private keywordScore: Queue,
+    @InjectQueue('stats-rollup') private statsRollup: Queue,
   ) {
-    this.queues.set('scrape:facebook', scrapeFb);
-    this.queues.set('scrape:instagram', scrapeIg);
+    this.queues.set('scrape-facebook', scrapeFb);
+    this.queues.set('scrape-instagram', scrapeIg);
     this.queues.set('enrich', enrich);
     this.queues.set('score', score);
     this.queues.set('dedup', dedup);
     this.queues.set('validate', validate);
+    this.queues.set('validate-neverbounce', validateNb);
+    this.queues.set('validate-bounceban', validateBb);
     this.queues.set('personalize', personalize);
+    this.queues.set('qa', qa);
     this.queues.set('upload', upload);
-    this.queues.set('reply:sync', replySync);
-    this.queues.set('reply:classify', replyClassify);
+    this.queues.set('reply-sync', replySync);
+    this.queues.set('reply-classify', replyClassify);
     this.queues.set('remediate', remediate);
-    this.queues.set('session:health-check', sessionHealth);
-    this.queues.set('session:auto-reauth', sessionReauth);
-    this.queues.set('paperclip:15min', paperclip15);
-    this.queues.set('paperclip:hourly', paperclipHourly);
-    this.queues.set('paperclip:daily', paperclipDaily);
-    this.queues.set('paperclip:weekly', paperclipWeekly);
-    this.queues.set('exa:search', exaSearch);
-    this.queues.set('keyword:score', keywordScore);
-    this.queues.set('stats:rollup', statsRollup);
+    this.queues.set('session-health-check', sessionHealth);
+    this.queues.set('session-auto-reauth', sessionReauth);
+    this.queues.set('paperclip-15min', paperclip15);
+    this.queues.set('paperclip-hourly', paperclipHourly);
+    this.queues.set('paperclip-daily', paperclipDaily);
+    this.queues.set('paperclip-weekly', paperclipWeekly);
+    this.queues.set('exa-search', exaSearch);
+    this.queues.set('keyword-score', keywordScore);
+    this.queues.set('stats-rollup', statsRollup);
   }
 
   private getQueue(name: string): Queue {

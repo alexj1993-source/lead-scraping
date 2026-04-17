@@ -1,4 +1,4 @@
-import type { EnrichedLead } from './lead.js';
+import type { EnrichedLead } from './lead';
 
 export type EnrichmentProvider =
   | 'apollo'

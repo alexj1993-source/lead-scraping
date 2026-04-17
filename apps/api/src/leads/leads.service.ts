@@ -104,7 +104,7 @@ export class LeadsService {
       events.push({
         event: 'validated',
         timestamp: lead.validatedAt,
-        detail: `NB: ${lead.neverbounceResult}, ZB: ${lead.zerobounceResult}`,
+        detail: `NB: ${lead.neverbounceResult}, BB: ${lead.bouncebanResult}`,
       });
     }
     if (lead.personalizedAt) {

@@ -1,12 +1,12 @@
-import type { EmailValidationResult } from './lead.js';
+import type { EmailValidationResult } from './lead';
 
-export type ValidationProvider = 'neverbounce' | 'zerobounce';
+export type ValidationProvider = 'neverbounce' | 'bounceban';
 
 export interface ValidationResult {
   email: string;
   neverbounce?: EmailValidationResult;
-  zerobounce?: EmailValidationResult;
-  zerobounceSubStatus?: string;
+  bounceban?: EmailValidationResult;
+  bouncebanScore?: number;
   isValid: boolean;
   isRoleBased: boolean;
 }

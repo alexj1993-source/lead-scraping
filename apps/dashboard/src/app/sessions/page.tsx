@@ -4,6 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { Key, RefreshCcw, Shield, AlertCircle } from 'lucide-react';
 import clsx from 'clsx';
 import { useSessions } from '@/lib/hooks';
+import { ApiErrorState, ApiEmptyState, ApiLoadingState } from '@/components/ui/api-state';
 
 interface Account {
   account: string;
@@ -28,9 +29,9 @@ export default function SessionsPage() {
   const sessionsQuery = useSessions();
   const services: ServicePool[] = Array.isArray(sessionsQuery.data) ? sessionsQuery.data as ServicePool[] : [];
 
-  if (sessionsQuery.isLoading) return <div className="p-8 text-center text-gray-400">Loading...</div>;
-  if (sessionsQuery.isError) return <div className="p-8 text-center text-red-400">Failed to load data</div>;
-  if (!services.length) return <div className="p-8 text-center text-gray-400">No data yet</div>;
+  if (sessionsQuery.isLoading) return <ApiLoadingState />;
+  if (sessionsQuery.isError) return <ApiErrorState onRetry={() => sessionsQuery.refetch()} />;
+  if (!services.length) return <ApiEmptyState title="No sessions" description="Session credentials are added when you configure Instagram scraping accounts." />;
 
   return (
     <div className="space-y-6 pb-20 md:pb-6">

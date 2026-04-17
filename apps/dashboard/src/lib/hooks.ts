@@ -67,6 +67,10 @@ export function useManualReview() {
   return useQuery({ queryKey: ['manual-review'], queryFn: () => apiFetch('/api/manual-review'), staleTime: 30_000 });
 }
 
+export function useSchedule() {
+  return useQuery({ queryKey: ['schedule'], queryFn: () => apiFetch('/api/schedule'), staleTime: 60_000 });
+}
+
 export function useProviderSettings() {
   return useQuery({ queryKey: ['provider-settings'], queryFn: () => apiFetch('/api/settings'), staleTime: 30_000 });
 }
@@ -83,4 +87,12 @@ export function useDeliverabilityInboxes(filters?: Record<string, string>) {
 
 export function useDeliverabilityCapacity() {
   return useQuery({ queryKey: ['capacity'], queryFn: () => apiFetch('/api/deliverability/capacity'), staleTime: 30_000 });
+}
+
+export function useDeliverabilityOverview() {
+  return useQuery({ queryKey: ['deliverability-overview'], queryFn: () => apiFetch('/api/deliverability/overview'), staleTime: 30_000 });
+}
+
+export function useOnboardingStatus() {
+  return useQuery({ queryKey: ['onboarding-status'], queryFn: () => apiFetch('/api/settings/onboarding-status'), staleTime: 60_000 });
 }

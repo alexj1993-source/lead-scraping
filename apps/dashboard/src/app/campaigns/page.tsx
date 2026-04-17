@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Send, ChevronDown, Power } from 'lucide-react';
 import clsx from 'clsx';
 import { useCampaigns } from '@/lib/hooks';
+import { ApiErrorState, ApiEmptyState, ApiLoadingState } from '@/components/ui/api-state';
 
 interface Campaign {
   id: string;
@@ -42,9 +43,9 @@ export default function CampaignsPage() {
     });
   }
 
-  if (campaignsQuery.isLoading) return <div className="p-8 text-center text-gray-400">Loading...</div>;
-  if (campaignsQuery.isError) return <div className="p-8 text-center text-red-400">Failed to load data</div>;
-  if (!campaigns.length) return <div className="p-8 text-center text-gray-400">No data yet</div>;
+  if (campaignsQuery.isLoading) return <ApiLoadingState />;
+  if (campaignsQuery.isError) return <ApiErrorState onRetry={() => campaignsQuery.refetch()} />;
+  if (!campaigns.length) return <ApiEmptyState title="No campaigns yet" description="Campaigns are created when you configure sources and run the pipeline." />;
 
   return (
     <div className="space-y-6 pb-20 md:pb-6">

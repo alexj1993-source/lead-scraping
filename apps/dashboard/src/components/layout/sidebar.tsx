@@ -16,30 +16,37 @@ import {
   DollarSign,
   AlertTriangle,
   Settings,
+  Calendar,
+  Shield,
   PanelLeftClose,
   PanelLeftOpen,
   MoreHorizontal,
 } from 'lucide-react';
+import { ThemeToggle } from '@/components/theme-toggle';
 
-const navItems = [
+const allNavItems = [
   { href: '/', label: 'Health', icon: Activity },
   { href: '/leads', label: 'Leads', icon: Users },
-  { href: '/paperclip', label: 'Paperclip CMO', icon: Bot },
+  { href: '/paperclip', label: 'Auto SDR', icon: Bot, hidden: true },
   { href: '/sources', label: 'Sources', icon: Database },
-  { href: '/campaigns', label: 'Campaigns', icon: Send },
+  { href: '/campaigns', label: 'Campaigns', icon: Send, hidden: true },
   { href: '/keywords', label: 'Keywords', icon: Tag },
-  { href: '/replies', label: 'Replies', icon: MessageSquare },
-  { href: '/sessions', label: 'Sessions', icon: Key },
-  { href: '/budgets', label: 'Budgets', icon: DollarSign },
-  { href: '/manual-review', label: 'Review', icon: AlertTriangle },
+  { href: '/deliverability', label: 'Deliverability', icon: Shield, hidden: true },
+  { href: '/schedule', label: 'Schedule', icon: Calendar, hidden: true },
+  { href: '/replies', label: 'Replies', icon: MessageSquare, hidden: true },
+  { href: '/sessions', label: 'Sessions', icon: Key, hidden: true },
+  { href: '/budgets', label: 'Budgets', icon: DollarSign, hidden: true },
+  { href: '/manual-review', label: 'Review', icon: AlertTriangle, hidden: true },
   { href: '/settings', label: 'Settings', icon: Settings },
 ];
+
+const navItems = allNavItems.filter((item) => !item.hidden);
 
 const mobileNavItems = [
   { href: '/', label: 'Health', icon: Activity },
   { href: '/leads', label: 'Leads', icon: Users },
-  { href: '/paperclip', label: 'Paperclip', icon: Bot },
-  { href: '/replies', label: 'Replies', icon: MessageSquare },
+  { href: '/sources', label: 'Sources', icon: Database },
+  { href: '/settings', label: 'Settings', icon: Settings },
 ];
 
 function isActive(pathname: string, href: string) {
@@ -95,16 +102,18 @@ export function Sidebar() {
             );
           })}
         </nav>
-        {!collapsed && (
-          <div className="border-t border-border px-4 py-3">
-            <div className="flex items-center gap-2">
-              <kbd className="rounded bg-surface-lighter px-1.5 py-0.5 text-[10px] font-mono text-text-muted">
-                ⌘K
-              </kbd>
-              <span className="text-xs text-text-muted">Command palette</span>
-            </div>
+        <div className="border-t border-border px-3 py-3">
+          <div className="flex items-center justify-between">
+            <ThemeToggle collapsed={collapsed} />
+            {!collapsed && (
+              <div className="flex items-center gap-1.5">
+                <kbd className="rounded bg-surface-lighter px-1.5 py-0.5 text-[10px] font-mono text-text-muted">
+                  ⌘K
+                </kbd>
+              </div>
+            )}
           </div>
-        )}
+        </div>
       </aside>
 
       {/* Mobile bottom nav */}

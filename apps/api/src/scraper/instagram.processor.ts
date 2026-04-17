@@ -12,7 +12,7 @@ interface InstagramJobData {
   maxResults?: number;
 }
 
-@Processor('scrape:instagram')
+@Processor('scrape-instagram')
 export class InstagramProcessor extends WorkerHost {
   constructor(
     private readonly scraperService: InstagramScraperService,

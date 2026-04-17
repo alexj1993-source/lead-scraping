@@ -9,7 +9,51 @@ export type PaperclipActionCategory =
   | 'session_reauth'
   | 'campaign_health'
   | 'budget_review'
-  | 'personalization_ab_test';
+  | 'personalization_ab_test'
+  | 'morning_assessment'
+  | 'midday_check'
+  | 'evening_wrap'
+  | 'continuous_monitor'
+  | 'remediation'
+  | 'scrape_volume_adjustment';
+
+export interface CmoAssessment {
+  shouldRun: boolean;
+  reasoning: string;
+  keywordAdjustments: Array<{ keywordId: string; action: 'increase_weight' | 'decrease_weight' | 'deactivate' }>;
+  volumeAdjustment: number;
+  alerts: string[];
+}
+
+export interface CmoMiddayStatus {
+  onTrack: boolean;
+  leadsToday: number;
+  dailyTarget: number;
+  pctComplete: number;
+  recommendation: 'continue' | 'increase_volume' | 'decrease_volume' | 'pause';
+  reasoning: string;
+  queueHealth: Record<string, { waiting: number; active: number; failed: number }>;
+}
+
+export interface CmoEveningSummary {
+  date: string;
+  totalScraped: number;
+  totalUploaded: number;
+  totalCostUsd: number;
+  keywordsDeactivated: string[];
+  keywordsPromoted: string[];
+  nextDayPlan: string;
+}
+
+export interface RemediationPattern {
+  id: string;
+  name: string;
+  detection: string;
+  primaryFix: string;
+  escalation: string;
+  cooldownMs: number;
+  maxRetries: number;
+}
 
 export interface PaperclipDecision {
   action: string;

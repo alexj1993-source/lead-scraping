@@ -1,4 +1,4 @@
-export { BaseAdapter, type AdapterResult, type LeadInput } from './base.js';
+export { BaseAdapter, type AdapterResult, type LeadInput } from './base';
 
 export {
   getActiveFacebookAdapter,
@@ -8,7 +8,7 @@ export {
   qualifyAd,
   type RawFacebookAd,
   type QualificationResult,
-} from './facebook/index.js';
+} from './facebook/index';
 
 export {
   getActiveInstagramAdapter,
@@ -19,11 +19,11 @@ export {
   extractCompanyName,
   type RawInstagramProfile,
   type IGQualificationResult,
-} from './instagram/index.js';
+} from './instagram/index';
 
 export {
   evaluateSourceHealth,
   getNextTier,
   executeTierSwitch,
   type SourceHealthEvaluation,
-} from './tier-switcher.js';
+} from './tier-switcher';

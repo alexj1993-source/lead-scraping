@@ -2,7 +2,6 @@
 
 import { TrafficLight } from '@/components/ui/traffic-light';
 import { StatCard } from '@/components/ui/stat-card';
-import { AlertCard } from '@/components/ui/alert-card';
 import { Badge } from '@/components/ui/badge';
 import {
   Upload,
@@ -10,163 +9,136 @@ import {
   Pause,
   ListChecks,
   Bot,
-  Facebook,
-  Instagram,
   BarChart3,
 } from 'lucide-react';
 import { useHealth, useDailyStats, useAlerts } from '@/lib/hooks';
-
-const channelIcons: Record<string, React.ReactNode> = {
-  'Facebook Ads': <Facebook className="h-5 w-5" />,
-  'Instagram': <Instagram className="h-5 w-5" />,
-};
+import { AlertCard } from '@/components/ui/alert-card';
+import { useRouter } from 'next/navigation';
 
 export default function HealthPage() {
   const health = useHealth();
   const stats = useDailyStats();
   const alertsQuery = useAlerts();
+  const router = useRouter();
 
-  if (health.isLoading || stats.isLoading || alertsQuery.isLoading)
-    return <div className="p-8 text-center text-gray-400">Loading...</div>;
-  if (health.isError || stats.isError || alertsQuery.isError)
-    return <div className="p-8 text-center text-red-400">Failed to load data</div>;
+  const isLoading = health.isLoading || stats.isLoading;
+  const allErrored = health.isError && stats.isError;
 
-  const healthData = health.data as any;
-  const statsData = stats.data as any;
-  const alertsData = alertsQuery.data as any;
+  const h = health.data as any;
+  const s = stats.data as any;
+  const alerts = Array.isArray(alertsQuery.data) ? (alertsQuery.data as any[]) : [];
 
-  const healthIndicators = healthData?.indicators ?? [];
-  const channelStats = (statsData?.channels ?? []).map((ch: any) => ({
-    ...ch,
-    icon: channelIcons[ch.label] ?? null,
-  }));
-  const alerts = Array.isArray(alertsData) ? alertsData : [];
-  const latestAction = healthData?.latestPaperclipAction;
+  if (isLoading) return (
+    <div className="flex flex-col items-center justify-center py-20 gap-3">
+      <div className="h-8 w-8 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+      <p className="text-sm text-text-muted">Loading dashboard...</p>
+    </div>
+  );
 
-  if (!healthIndicators.length && !channelStats.length && !alerts.length)
-    return <div className="p-8 text-center text-gray-400">No data yet</div>;
+  if (allErrored) return (
+    <div className="flex flex-col items-center justify-center py-20 gap-4">
+      <div className="rounded-full bg-yellow-500/10 p-4">
+        <Play className="h-8 w-8 text-yellow-400" />
+      </div>
+      <h2 className="text-lg font-semibold text-text-primary">Backend API not connected</h2>
+      <p className="max-w-md text-center text-sm text-text-muted">
+        Make sure Docker is running (for Postgres + Redis), then start the API server.
+      </p>
+      <button
+        onClick={() => { health.refetch(); stats.refetch(); alertsQuery.refetch(); }}
+        className="mt-2 rounded-lg border border-border bg-surface-light px-4 py-2 text-sm font-medium text-text-secondary hover:bg-surface-lighter transition-colors"
+      >
+        Retry Connection
+      </button>
+    </div>
+  );
 
-  const total = channelStats.reduce((s: number, c: any) => s + (c.value ?? 0), 0);
-  const totalTarget = channelStats.reduce((s: number, c: any) => s + (c.target ?? 0), 0);
+  const indicators = h ? [
+    h.pipeline && { ...h.pipeline, label: h.pipeline.label ?? 'Pipeline' },
+    h.budget && { ...h.budget, label: h.budget.label ?? 'Budget' },
+    h.deliverability && { ...h.deliverability, label: h.deliverability.label ?? 'Sources' },
+    h.paperclip && { ...h.paperclip, label: h.paperclip.label ?? 'Auto SDR' },
+  ].filter(Boolean) : (h?.indicators ?? []);
+
+  const todayNumbers = s ?? h?.todayNumbers ?? {};
+  const fb = todayNumbers.facebook ?? { uploaded: 0, target: 300 };
+  const ig = todayNumbers.instagram ?? { uploaded: 0, target: 200 };
+  const total = todayNumbers.total ?? { uploaded: 0, target: 500 };
 
   return (
-    <div className="space-y-6 pb-20 md:pb-6">
-      {/* Traffic lights */}
+    <div className="space-y-8 pb-20 md:pb-6">
+      {/* System Health */}
       <section>
-        <h2 className="mb-3 text-sm font-medium text-text-secondary">System Health</h2>
+        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-text-muted">System Health</h2>
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          {healthIndicators.map((h) => (
-            <TrafficLight key={h.label} {...h} />
+          {indicators.map((ind: any) => (
+            <TrafficLight
+              key={ind.label}
+              status={ind.status}
+              label={ind.label}
+              detail={ind.detail}
+              onClick={ind.link ? () => router.push(ind.link) : undefined}
+            />
           ))}
         </div>
       </section>
 
-      {/* Today's numbers */}
+      {/* Today's Pipeline */}
       <section>
-        <h2 className="mb-3 text-sm font-medium text-text-secondary">Today&apos;s Numbers</h2>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {channelStats.map((ch) => (
-            <div
-              key={ch.label}
-              className="rounded-xl border border-border bg-surface-light p-5 transition-colors duration-200"
-            >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-text-secondary">
-                  {ch.icon}
-                  <span className="text-sm font-medium">{ch.label}</span>
-                </div>
-                <Badge variant={ch.value >= ch.target ? 'green' : 'yellow'}>
-                  {Math.round((ch.value / ch.target) * 100)}%
-                </Badge>
-              </div>
-              <p className="mt-3 text-3xl font-bold tracking-tight">
-                {ch.value}
-                <span className="text-lg text-text-muted"> / {ch.target}</span>
-              </p>
-              <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-surface-lighter">
-                <div
-                  className="h-full rounded-full bg-primary transition-all duration-500"
-                  style={{ width: `${Math.min(100, (ch.value / ch.target) * 100)}%` }}
-                />
-              </div>
-              <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-                <span className="text-text-muted">Cost</span>
-                <span className="text-right text-text-secondary">{ch.cost}</span>
-                <span className="text-text-muted">CPL</span>
-                <span className="text-right text-text-secondary">{ch.cpl}</span>
-                <span className="text-text-muted">Replies</span>
-                <span className="text-right text-text-secondary">{ch.replies}</span>
-                <span className="text-text-muted">Booked</span>
-                <span className="text-right text-text-secondary">{ch.booked}</span>
-              </div>
-            </div>
-          ))}
-
+        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-text-muted">Today&apos;s Pipeline</h2>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <PipelineCard
+            label="Facebook Ads"
+            value={fb.uploaded}
+            target={fb.target}
+          />
+          <PipelineCard
+            label="Instagram"
+            value={ig.uploaded}
+            target={ig.target}
+          />
           <StatCard
             label="Total Uploaded"
-            value={total}
-            subtitle={`of ${totalTarget} target`}
-            trend={{ value: 12, label: 'vs yesterday' }}
+            value={total.uploaded}
+            subtitle={`of ${total.target} target`}
             icon={<BarChart3 className="h-5 w-5" />}
           />
         </div>
+        <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <MiniStat label="Total Cost" value={`$${(todayNumbers.costUsd ?? 0).toFixed(2)}`} />
+          <MiniStat label="Cost/Lead" value={`$${(todayNumbers.costPerLead ?? 0).toFixed(2)}`} />
+          <MiniStat label="Replies Today" value={String(todayNumbers.repliesToday ?? 0)} />
+          <MiniStat label="Booked Today" value={String(todayNumbers.bookedToday ?? 0)} />
+        </div>
       </section>
 
-      {/* Paperclip's latest action */}
-      <section>
-        <h2 className="mb-3 text-sm font-medium text-text-secondary">Paperclip&apos;s Latest Action</h2>
-        <div className="rounded-xl border border-primary/20 bg-surface-light p-5">
-          <div className="flex items-start gap-3">
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/15">
-              <Bot className="h-5 w-5 text-primary-light" />
-            </span>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <p className="text-sm font-medium text-text-primary">
-                    {latestAction?.action ?? 'No recent action'}
-                  </p>
-                  {latestAction?.reasoning && (
-                    <p className="mt-1 text-xs text-text-secondary">
-                      Reasoning: {latestAction.reasoning}
-                    </p>
-                  )}
-                </div>
-                <button className="shrink-0 rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:bg-surface-lighter hover:text-text-primary min-h-[32px]">
-                  Override
-                </button>
-              </div>
-              <p className="mt-2 text-xs text-text-muted">{latestAction?.timestamp ?? ''}</p>
-            </div>
+      {/* Active Alerts */}
+      {alerts.length > 0 && (
+        <section>
+          <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-text-muted">Active Alerts</h2>
+          <div className="space-y-3">
+            {alerts.map((alert: any, i: number) => (
+              <AlertCard key={i} {...alert} onAction={() => {}} onDismiss={() => {}} />
+            ))}
           </div>
-        </div>
-      </section>
+        </section>
+      )}
 
-      {/* Active alerts */}
+      {/* Quick Actions */}
       <section>
-        <h2 className="mb-3 text-sm font-medium text-text-secondary">Active Alerts</h2>
-        <div className="space-y-3">
-          {alerts.map((alert, i) => (
-            <AlertCard key={i} {...alert} onAction={() => {}} onDismiss={() => {}} />
-          ))}
-        </div>
-      </section>
-
-      {/* Quick actions */}
-      <section>
-        <h2 className="mb-3 text-sm font-medium text-text-secondary">Quick Actions</h2>
-        <div className="flex flex-wrap gap-3">
+        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-text-muted">Quick Actions</h2>
+        <div className="flex flex-wrap gap-2">
           {[
             { label: 'Import CSV', icon: Upload },
             { label: 'Run Pipeline', icon: Play },
             { label: 'Pause All', icon: Pause },
-            { label: 'Paperclip Queue', icon: ListChecks },
+            { label: 'Auto SDR Queue', icon: ListChecks },
           ].map((action) => {
             const Icon = action.icon;
             return (
               <button
                 key={action.label}
-                className="flex items-center gap-2 rounded-xl border border-border bg-surface-light px-4 py-2.5 text-sm font-medium text-text-secondary transition-colors duration-200 hover:bg-surface-lighter hover:text-text-primary min-h-[44px]"
+                className="flex items-center gap-2 rounded-lg border border-border bg-surface-light px-3.5 py-2 text-sm font-medium text-text-secondary transition-colors duration-150 hover:bg-surface-lighter hover:text-text-primary"
               >
                 <Icon className="h-4 w-4" />
                 {action.label}
@@ -175,6 +147,39 @@ export default function HealthPage() {
           })}
         </div>
       </section>
+    </div>
+  );
+}
+
+function PipelineCard({ label, value, target }: { label: string; value: number; target: number }) {
+  const pct = target > 0 ? (value / target) * 100 : 0;
+  return (
+    <div className="rounded-xl border border-border bg-surface-light p-5">
+      <div className="flex items-center justify-between">
+        <span className="text-sm font-medium text-text-secondary">{label}</span>
+        <Badge variant={pct >= 100 ? 'green' : pct > 0 ? 'yellow' : 'muted'}>
+          {Math.round(pct)}%
+        </Badge>
+      </div>
+      <p className="mt-3 text-3xl font-bold tracking-tight tabular-nums">
+        {value}
+        <span className="text-lg text-text-muted"> / {target}</span>
+      </p>
+      <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-surface-lighter">
+        <div
+          className="h-full rounded-full bg-primary transition-all duration-500"
+          style={{ width: `${Math.min(100, pct)}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function MiniStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-border bg-surface-light p-3">
+      <p className="text-xs text-text-muted">{label}</p>
+      <p className="mt-1 text-lg font-semibold tabular-nums">{value}</p>
     </div>
   );
 }

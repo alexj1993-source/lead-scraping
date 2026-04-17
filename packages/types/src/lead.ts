@@ -86,7 +86,7 @@ export interface ScoredLead extends EnrichedLead {
 
 export interface ValidatedLead extends ScoredLead {
   neverbounceResult: EmailValidationResult;
-  zerobounceResult: EmailValidationResult;
+  bouncebanResult: EmailValidationResult;
   validatedAt: string;
 }
 

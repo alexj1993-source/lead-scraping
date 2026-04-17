@@ -13,7 +13,7 @@ interface FacebookAdsJobData {
   country?: string;
 }
 
-@Processor('scrape:facebook')
+@Processor('scrape-facebook')
 export class FacebookAdsProcessor extends WorkerHost {
   constructor(private readonly queueService: QueueService) {
     super();

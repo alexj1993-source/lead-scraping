@@ -1,46 +1,26 @@
 import { Injectable } from '@nestjs/common';
 import Anthropic from '@anthropic-ai/sdk';
 import { prisma } from '@hyperscale/database';
-import { containsBannedContent } from '@hyperscale/config';
-import { searchForPersonalizationContext } from '@hyperscale/exa';
+import { fetchLandingPage } from '../common/landing-page-fetcher';
 import { createLogger } from '../common/logger';
 import { BudgetService } from '../budget/budget.service';
 import { QueueService } from '../queues/queue.service';
-import {
-  PERSONALIZATION_SYSTEM_PROMPT,
-  VARIANT_A_SUPPLEMENT,
-  VARIANT_B_SUPPLEMENT,
-  VARIANT_C_SUPPLEMENT,
-} from './prompts';
+import { buildLeadMagnetPrompt } from './prompts';
 
-type Variant = 'A' | 'B' | 'C';
+const PRIMARY_MODEL = 'claude-sonnet-4-20250514';
+const FALLBACK_MODEL = 'claude-3-5-haiku-20241022';
+const MAX_TOKENS = 100;
+const LEAD_MAGNET_LLM_COST = 0.003;
+const FALLBACK_LEAD_MAGNET = 'your training program';
+const MAX_RETRIES = 3;
 
-interface PersonalizationOutput {
-  icebreaker: string;
-  angle: string;
-  subjectLine: string;
-}
-
-interface PersonalizationResult {
+interface LeadMagnetResult {
   success: boolean;
-  personalization?: PersonalizationOutput;
-  variant: Variant;
+  leadMagnet: string;
+  model: string;
+  tokensUsed: number;
+  durationMs: number;
 }
-
-const ANTHROPIC_MODEL = 'claude-sonnet-4-20250514';
-const PERSONALIZATION_LLM_COST = 0.004;
-
-const GENERIC_PHRASES = [
-  'i came across your',
-  'i noticed your company',
-  'i saw that you',
-  'hope this finds you well',
-  'i hope you are doing well',
-  'reaching out because',
-  'just wanted to reach out',
-  'i was impressed by',
-  'your impressive',
-];
 
 @Injectable()
 export class PersonalizationService {
@@ -54,231 +34,144 @@ export class PersonalizationService {
     this.anthropic = new Anthropic();
   }
 
-  async personalizeLead(leadId: string): Promise<PersonalizationResult> {
+  async personalizeLead(leadId: string): Promise<LeadMagnetResult> {
+    const startTime = Date.now();
     const lead = await prisma.lead.findUniqueOrThrow({ where: { id: leadId } });
 
     await prisma.lead.update({ where: { id: leadId }, data: { status: 'PERSONALIZING' } });
 
-    // Pull Exa context if not already stored
-    let exaContext = lead.exaContext as any;
-    if (!exaContext && lead.firstName && lead.companyName) {
+    let title = '';
+    let h1 = '';
+    let description = '';
+
+    if (lead.leadMagnetDescription) {
+      description = lead.leadMagnetDescription;
+      title = lead.leadMagnetType ?? '';
+    } else if (lead.landingPageUrl) {
       try {
-        const nameParts = (lead.fullName ?? lead.firstName ?? '').split(' ');
-        const firstName = nameParts[0] ?? '';
-        const lastName = nameParts.slice(1).join(' ') || lead.companyName;
-
-        exaContext = await searchForPersonalizationContext(firstName, lastName, lead.companyName);
-
-        await prisma.lead.update({
-          where: { id: leadId },
-          data: { exaContext: exaContext as any },
-        });
+        const page = await fetchLandingPage(lead.landingPageUrl);
+        if (page) {
+          title = page.title;
+          h1 = page.h1;
+          description = page.description;
+        }
       } catch (err) {
-        this.logger.warn({ leadId, err }, 'Exa personalization context search failed');
-        exaContext = null;
+        this.logger.warn({ leadId, err }, 'Landing page fetch failed');
       }
     }
 
-    const variant = this.selectVariant();
-    const variantPrompt = this.getVariantPrompt(variant);
+    let leadMagnet: string;
+    let model = PRIMARY_MODEL;
+    let tokensUsed = 0;
 
-    let personalization: PersonalizationOutput;
     try {
-      personalization = await this.generatePersonalization(lead, exaContext, variantPrompt);
-      await this.budgetService.trackUsage('anthropic', PERSONALIZATION_LLM_COST);
+      const result = await this.generateLeadMagnet({
+        title,
+        h1,
+        description,
+        companyName: lead.companyName,
+        landingPageUrl: lead.landingPageUrl ?? '',
+      });
+      leadMagnet = result.text;
+      model = result.model;
+      tokensUsed = result.tokensUsed;
+      await this.budgetService.trackUsage('anthropic', LEAD_MAGNET_LLM_COST);
     } catch (err) {
-      this.logger.error({ leadId, err }, 'Personalization LLM call failed');
-      throw err;
+      this.logger.warn({ leadId, err }, 'Lead magnet generation failed, using fallback');
+      leadMagnet = FALLBACK_LEAD_MAGNET;
     }
 
-    const qualityCheck = this.runQualityGates(personalization, lead);
-
-    if (!qualityCheck.passed) {
-      this.logger.warn(
-        { leadId, violations: qualityCheck.violations },
-        'Personalization failed quality gates',
-      );
-
-      await this.queueService.addJob('remediate', {
-        leadId,
-        trigger: 'personalization_rejected',
-        context: { violations: qualityCheck.violations, variant, personalization },
-      });
-
-      await prisma.lead.update({
-        where: { id: leadId },
-        data: { status: 'AUTO_REMEDIATING' },
-      });
-
-      return { success: false, variant };
-    }
+    const existingPersonalization = (lead.personalization as Record<string, any>) ?? {};
 
     await prisma.lead.update({
       where: { id: leadId },
       data: {
-        personalization: {
-          icebreaker: personalization.icebreaker,
-          angle: personalization.angle,
-          subjectLine: personalization.subjectLine,
-          variant,
-        } as any,
-        status: 'READY_TO_UPLOAD',
+        personalization: { ...existingPersonalization, leadMagnet } as any,
+        status: 'PERSONALIZED',
+        personalizedAt: new Date(),
       },
     });
 
     await this.queueService.addJob('qa', { leadId });
 
-    this.logger.info({ leadId, variant }, 'Lead personalized, queued for QA');
-    return { success: true, personalization, variant };
+    const durationMs = Date.now() - startTime;
+    this.logger.info(
+      { leadId, source: lead.source, durationMs, model, tokensUsed },
+      'Lead personalized with lead magnet',
+    );
+
+    return { success: true, leadMagnet, model, tokensUsed, durationMs };
   }
 
-  private async generatePersonalization(
-    lead: any,
-    exaContext: any,
-    variantPrompt: string,
-  ): Promise<PersonalizationOutput> {
-    const leadSummary = [
-      `Company: ${lead.companyName}`,
-      lead.firstName ? `First name: ${lead.firstName}` : null,
-      lead.fullName ? `Full name: ${lead.fullName}` : null,
-      lead.title ? `Title: ${lead.title}` : null,
-      lead.leadMagnetDescription ? `Lead magnet: ${lead.leadMagnetDescription}` : null,
-      lead.leadMagnetType ? `Lead magnet type: ${lead.leadMagnetType}` : null,
-      lead.websiteUrl ? `Website: ${lead.websiteUrl}` : null,
-      lead.source ? `Source: ${lead.source}` : null,
-      lead.country ? `Country: ${lead.country}` : null,
-    ]
-      .filter(Boolean)
-      .join('\n');
+  private async generateLeadMagnet(input: {
+    title: string;
+    h1: string;
+    description: string;
+    companyName: string;
+    landingPageUrl: string;
+  }): Promise<{ text: string; model: string; tokensUsed: number }> {
+    const userMessage = buildLeadMagnetPrompt(input);
 
-    let exaSummary = '';
-    if (exaContext) {
-      const parts: string[] = [];
-      if (exaContext.recentPodcasts?.length > 0)
-        parts.push(`Recent podcasts: ${exaContext.recentPodcasts.slice(0, 3).join(', ')}`);
-      if (exaContext.recentPosts?.length > 0)
-        parts.push(`Recent posts: ${exaContext.recentPosts.slice(0, 3).join(', ')}`);
-      if (exaContext.recentLaunches?.length > 0)
-        parts.push(`Recent launches: ${exaContext.recentLaunches.slice(0, 3).join(', ')}`);
-      if (exaContext.mediaMentions?.length > 0)
-        parts.push(`Media mentions: ${exaContext.mediaMentions.slice(0, 3).join(', ')}`);
-      if (parts.length > 0) exaSummary = `\n\nRecent activity:\n${parts.join('\n')}`;
-    }
+    for (const model of [PRIMARY_MODEL, FALLBACK_MODEL]) {
+      for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        try {
+          const response = await this.anthropic.messages.create({
+            model,
+            max_tokens: MAX_TOKENS,
+            temperature: 0.5,
+            messages: [{ role: 'user', content: userMessage }],
+          });
 
-    const userMessage = `${variantPrompt}\n\nLead data:\n${leadSummary}${exaSummary}`;
+          const raw = response.content
+            .filter((block): block is Anthropic.TextBlock => block.type === 'text')
+            .map((block) => block.text)
+            .join('');
 
-    const response = await this.anthropic.messages.create({
-      model: ANTHROPIC_MODEL,
-      max_tokens: 500,
-      temperature: 0.7,
-      system: PERSONALIZATION_SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: userMessage }],
-    });
+          const tokensUsed =
+            (response.usage?.input_tokens ?? 0) + (response.usage?.output_tokens ?? 0);
 
-    const text = response.content
-      .filter((block): block is Anthropic.TextBlock => block.type === 'text')
-      .map((block) => block.text)
-      .join('');
+          return { text: this.sanitizeLeadMagnet(raw), model, tokensUsed };
+        } catch (err: any) {
+          const isRateLimit = err?.status === 429;
+          const isLastAttempt = attempt === MAX_RETRIES;
 
-    return this.parsePersonalizationJson(text);
-  }
+          if (isRateLimit && !isLastAttempt) {
+            const delay = Math.pow(2, attempt) * 1000;
+            this.logger.warn({ model, attempt, delay }, 'Rate limited, retrying');
+            await new Promise((r) => setTimeout(r, delay));
+            continue;
+          }
 
-  private parsePersonalizationJson(text: string): PersonalizationOutput {
-    try {
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) {
-        this.logger.warn({ text }, 'No JSON found in personalization response');
-        throw new Error('No JSON in LLM response');
-      }
+          if (isLastAttempt && model === PRIMARY_MODEL) {
+            this.logger.warn({ model, err }, 'Primary model exhausted retries, trying fallback');
+            break;
+          }
 
-      const parsed = JSON.parse(jsonMatch[0]);
-
-      if (!parsed.icebreaker || !parsed.angle || !parsed.subjectLine) {
-        throw new Error('Missing required personalization fields');
-      }
-
-      return {
-        icebreaker: String(parsed.icebreaker),
-        angle: String(parsed.angle),
-        subjectLine: String(parsed.subjectLine),
-      };
-    } catch (err) {
-      this.logger.error({ text, err }, 'Failed to parse personalization JSON');
-      throw err;
-    }
-  }
-
-  private getVariantPrompt(variant: Variant): string {
-    switch (variant) {
-      case 'A':
-        return VARIANT_A_SUPPLEMENT;
-      case 'B':
-        return VARIANT_B_SUPPLEMENT;
-      case 'C':
-        return VARIANT_C_SUPPLEMENT;
-    }
-  }
-
-  private selectVariant(): Variant {
-    const rand = Math.random();
-    if (rand < 0.90) return 'A';
-    if (rand < 0.95) return 'B';
-    return 'C';
-  }
-
-  private runQualityGates(
-    personalization: PersonalizationOutput,
-    lead: any,
-  ): { passed: boolean; violations: string[] } {
-    const violations: string[] = [];
-
-    // Banned content check
-    const fullText = `${personalization.icebreaker} ${personalization.angle} ${personalization.subjectLine}`;
-    const bannedCheck = containsBannedContent(fullText);
-    if (bannedCheck.hasBanned) {
-      violations.push(...bannedCheck.violations.map((v) => `banned: ${v}`));
-    }
-
-    // Length checks
-    if (personalization.icebreaker.length < 20) {
-      violations.push(`icebreaker too short (${personalization.icebreaker.length} chars, min 20)`);
-    }
-    if (personalization.icebreaker.length > 200) {
-      violations.push(`icebreaker too long (${personalization.icebreaker.length} chars, max 200)`);
-    }
-    if (personalization.subjectLine.length < 5) {
-      violations.push(`subject line too short (${personalization.subjectLine.length} chars, min 5)`);
-    }
-    if (personalization.subjectLine.length > 80) {
-      violations.push(`subject line too long (${personalization.subjectLine.length} chars, max 80)`);
-    }
-
-    // Specificity: must reference company name or first name
-    const icebreakerLower = personalization.icebreaker.toLowerCase();
-    const companyLower = (lead.companyName ?? '').toLowerCase();
-    const firstNameLower = (lead.firstName ?? '').toLowerCase();
-
-    const referencesCompany = companyLower && icebreakerLower.includes(companyLower);
-    const referencesName = firstNameLower && icebreakerLower.includes(firstNameLower);
-    const referencesLeadMagnet =
-      lead.leadMagnetDescription &&
-      lead.leadMagnetDescription
-        .toLowerCase()
-        .split(' ')
-        .filter((w: string) => w.length > 4)
-        .some((keyword: string) => icebreakerLower.includes(keyword));
-
-    if (!referencesCompany && !referencesName && !referencesLeadMagnet) {
-      violations.push('icebreaker does not reference company name, first name, or lead magnet');
-    }
-
-    // Generic phrase detection
-    for (const phrase of GENERIC_PHRASES) {
-      if (icebreakerLower.includes(phrase)) {
-        violations.push(`generic phrase detected: "${phrase}"`);
+          throw err;
+        }
       }
     }
 
-    return { passed: violations.length === 0, violations };
+    throw new Error('All models and retries exhausted');
+  }
+
+  private sanitizeLeadMagnet(raw: string): string {
+    let text = raw
+      .trim()
+      .replace(/^["']+|["']+$/g, '')
+      .replace(/\n/g, ' ')
+      .trim()
+      .toLowerCase();
+
+    const words = text.split(/\s+/);
+    if (words.length > 15) {
+      text = words.slice(0, 15).join(' ');
+    }
+
+    if (!text.startsWith('your') && !text.startsWith('the')) {
+      text = 'your ' + text;
+    }
+
+    return text;
   }
 }

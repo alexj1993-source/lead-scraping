@@ -18,7 +18,14 @@ export class PersonalizationProcessor extends WorkerHost {
     try {
       const result = await this.personalizationService.personalizeLead(leadId);
       logger.info(
-        { jobId: job.id, leadId, success: result.success, variant: result.variant },
+        {
+          jobId: job.id,
+          leadId,
+          success: result.success,
+          model: result.model,
+          tokensUsed: result.tokensUsed,
+          durationMs: result.durationMs,
+        },
         'Personalization job completed',
       );
       return result;

@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import clsx from 'clsx';
 import { usePaperclipActions, usePaperclipRecommendations } from '@/lib/hooks';
+import { ApiErrorState, ApiEmptyState, ApiLoadingState } from '@/components/ui/api-state';
 
 interface PaperclipAction {
   id: string;
@@ -42,10 +43,9 @@ export default function PaperclipPage() {
   const [strategyOpen, setStrategyOpen] = useState(false);
   const [thinking] = useState(true);
 
-  if (actionsQuery.isLoading || recsQuery.isLoading)
-    return <div className="p-8 text-center text-gray-400">Loading...</div>;
-  if (actionsQuery.isError || recsQuery.isError)
-    return <div className="p-8 text-center text-red-400">Failed to load data</div>;
+  if (actionsQuery.isLoading || recsQuery.isLoading) return <ApiLoadingState />;
+  if (actionsQuery.isError && recsQuery.isError)
+    return <ApiErrorState onRetry={() => { actionsQuery.refetch(); recsQuery.refetch(); }} />;
 
   const actionsData = actionsQuery.data as any;
   const recentActions: { action: string; reasoning: string; timestamp: string }[] = actionsData?.recent ?? [];
@@ -66,8 +66,8 @@ export default function PaperclipPage() {
             <Bot className="h-5 w-5 text-primary-light" />
           </div>
           <div>
-            <h1 className="text-xl font-bold">Paperclip CMO</h1>
-            <p className="text-sm text-text-muted">Autonomous marketing intelligence</p>
+            <h1 className="text-xl font-bold">Auto SDR</h1>
+            <p className="text-sm text-text-muted">Autonomous sales development</p>
           </div>
         </div>
         {thinking && (

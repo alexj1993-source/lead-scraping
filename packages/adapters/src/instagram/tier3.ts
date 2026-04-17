@@ -1,10 +1,10 @@
-import { BaseAdapter, type AdapterResult, type LeadInput } from '../base.js';
+import { BaseAdapter, type AdapterResult, type LeadInput } from '../base';
 import {
   qualifyProfile,
   validateBioLink,
   extractCompanyName,
   type RawInstagramProfile,
-} from './qualify.js';
+} from './qualify';
 import {
   getActiveCredentials,
   getCredential,

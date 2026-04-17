@@ -5,7 +5,7 @@ import { createLogger } from '../common/logger';
 
 const logger = createLogger('validation-processor');
 
-@Processor('validate:neverbounce')
+@Processor('validate-neverbounce')
 export class NbValidationProcessor extends WorkerHost {
   constructor(private readonly validationService: ValidationService) {
     super();
@@ -28,8 +28,8 @@ export class NbValidationProcessor extends WorkerHost {
   }
 }
 
-@Processor('validate:zerobounce')
-export class ZbValidationProcessor extends WorkerHost {
+@Processor('validate-bounceban')
+export class BbValidationProcessor extends WorkerHost {
   constructor(private readonly validationService: ValidationService) {
     super();
   }
@@ -37,18 +37,18 @@ export class ZbValidationProcessor extends WorkerHost {
   async process(job: Job<{ leadIds?: string[] }>): Promise<any> {
     logger.info(
       { jobId: job.id, leadCount: job.data.leadIds?.length ?? 'all' },
-      'Starting ZeroBounce batch',
+      'Starting BounceBan batch',
     );
 
     try {
-      const result = await this.validationService.runZeroBounceBatch(job.data.leadIds);
+      const result = await this.validationService.runBounceBanBatch(job.data.leadIds);
       logger.info(
         { jobId: job.id, ...result },
-        'ZeroBounce batch completed',
+        'BounceBan batch completed',
       );
       return result;
     } catch (err) {
-      logger.error({ jobId: job.id, err }, 'ZeroBounce batch failed');
+      logger.error({ jobId: job.id, err }, 'BounceBan batch failed');
       throw err;
     }
   }

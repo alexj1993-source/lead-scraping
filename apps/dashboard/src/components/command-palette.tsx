@@ -24,14 +24,8 @@ import {
 const pages = [
   { label: 'Health', href: '/', icon: Activity },
   { label: 'Leads', href: '/leads', icon: Users },
-  { label: 'Paperclip CMO', href: '/paperclip', icon: Bot },
   { label: 'Sources', href: '/sources', icon: Database },
-  { label: 'Campaigns', href: '/campaigns', icon: Send },
   { label: 'Keywords', href: '/keywords', icon: Tag },
-  { label: 'Replies', href: '/replies', icon: MessageSquare },
-  { label: 'Sessions', href: '/sessions', icon: Key },
-  { label: 'Budgets', href: '/budgets', icon: DollarSign },
-  { label: 'Manual Review', href: '/manual-review', icon: AlertTriangle },
   { label: 'Settings', href: '/settings', icon: Settings },
 ];
 

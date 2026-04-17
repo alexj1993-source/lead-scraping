@@ -1,6 +1,6 @@
 import { ApifyClient } from 'apify-client';
-import { BaseAdapter, type AdapterResult, type LeadInput } from '../base.js';
-import { qualifyAd, type RawFacebookAd } from './qualify.js';
+import { BaseAdapter, type AdapterResult, type LeadInput } from '../base';
+import { qualifyAd, type RawFacebookAd } from './qualify';
 
 const ACTOR_ID = 'curious_coder~facebook-ads-library-scraper';
 

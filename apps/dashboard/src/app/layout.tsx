@@ -1,32 +1,26 @@
 import './globals.css';
 import type { Metadata } from 'next';
-import { Sidebar } from '@/components/layout/sidebar';
-import { CommandPalette } from '@/components/command-palette';
 import { QueryProvider } from '@/components/providers/query-provider';
-import { QueryBar } from '@/components/query-bar';
+import { AppShell } from '@/components/onboarding-guard';
 
 export const metadata: Metadata = {
-  title: 'Hyperscale Leads',
+  title: 'Auto SDR',
   description: 'Autonomous lead generation system',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className="dark">
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{var t=localStorage.getItem('theme');if(t==='light'){document.documentElement.setAttribute('data-theme','light')}else{document.documentElement.classList.add('dark')}}catch(e){}})()`,
+          }}
+        />
+      </head>
       <body className="min-h-screen bg-surface">
         <QueryProvider>
-          <CommandPalette />
-          <div className="flex h-screen">
-            <Sidebar />
-            <main className="flex-1 overflow-auto">
-              <div className="sticky top-0 z-10 border-b border-border bg-surface/80 backdrop-blur-sm px-6 py-3">
-                <QueryBar />
-              </div>
-              <div className="p-6">
-                {children}
-              </div>
-            </main>
-          </div>
+          <AppShell>{children}</AppShell>
         </QueryProvider>
       </body>
     </html>

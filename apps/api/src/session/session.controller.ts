@@ -48,7 +48,7 @@ export class SessionController {
       where: { id },
     });
 
-    const jobId = await this.queue.addJob('session:auto-reauth', {
+    const jobId = await this.queue.addJob('session-auto-reauth', {
       provider: session.service,
       sessionId: session.id,
     });

@@ -115,6 +115,8 @@ export class KeywordService {
     primary: string,
     source: Source,
     discoveredBy = 'manual',
+    secondary?: string,
+    labels?: string[],
   ): Promise<Keyword> {
     const enumVal = SOURCE_ENUM_MAP[source] as any;
     return prisma.keyword.create({
@@ -122,8 +124,25 @@ export class KeywordService {
         primary,
         source: enumVal,
         discoveredBy,
+        ...(secondary ? { secondary } : {}),
+        ...(labels ? { labels } : {}),
       },
     });
+  }
+
+  async updateKeyword(
+    id: string,
+    data: { primary?: string; secondary?: string; enabled?: boolean; labels?: string[] },
+  ): Promise<Keyword> {
+    return prisma.keyword.update({
+      where: { id },
+      data,
+    });
+  }
+
+  async deleteKeyword(id: string): Promise<void> {
+    await prisma.keyword.delete({ where: { id } });
+    logger.info({ keywordId: id }, 'Keyword deleted');
   }
 
   async autoRetireKeywords(): Promise<string[]> {

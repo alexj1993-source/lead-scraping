@@ -8,6 +8,7 @@
     "@hyperscale/database": "workspace:*",
     "@hyperscale/types": "workspace:*",
     "@hyperscale/config": "workspace:*",
+    "@hyperscale/sessions": "workspace:*",
     "apify-client": "^2.11.0",
     "pino": "^9.6.0"
   }

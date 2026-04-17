@@ -6,15 +6,25 @@ import { QueueService } from '../queues/queue.service';
 import { StatsService } from '../stats/stats.service';
 
 const NB_COST_PER_EMAIL = 0.008;
-const ZB_COST_PER_EMAIL = 0.0075;
+const BB_COST_PER_EMAIL = 0.008;
+const BB_BASE_URL = 'https://api.bounceban.com';
 const POLL_INTERVAL_MS = 30_000;
-const POLL_TIMEOUT_MS = 10 * 60 * 1000;
+const POLL_TIMEOUT_MS = 15 * 60 * 1000;
 const MAX_RETRIES = 3;
 
 interface BatchResult {
   processed: number;
   passed: number;
   failed: number;
+}
+
+interface BbEmailResult {
+  result: 'deliverable' | 'undeliverable' | 'risky' | 'unknown';
+  score: number;
+  is_disposable: boolean;
+  is_accept_all: boolean;
+  is_role: boolean;
+  is_free: boolean;
 }
 
 type NbRawResult = 'valid' | 'invalid' | 'disposable' | 'catchall' | 'unknown';
@@ -154,7 +164,7 @@ export class ValidationService {
     }
 
     if (nbPassedIds.length > 0) {
-      await this.queueService.addJob('validate:zerobounce', { leadIds: nbPassedIds });
+      await this.queueService.addJob('validate-bounceban', { leadIds: nbPassedIds });
     }
 
     this.logger.info(
@@ -274,10 +284,10 @@ export class ValidationService {
   }
 
   // ---------------------------------------------------------------------------
-  // ZeroBounce Batch
+  // BounceBan Batch (catch-all verification)
   // ---------------------------------------------------------------------------
 
-  async runZeroBounceBatch(leadIds?: string[]): Promise<BatchResult> {
+  async runBounceBanBatch(leadIds?: string[]): Promise<BatchResult> {
     const where = leadIds?.length
       ? { id: { in: leadIds }, status: 'NB_PASSED' as const }
       : { status: 'NB_PASSED' as const };
@@ -288,13 +298,13 @@ export class ValidationService {
     });
 
     if (leads.length < 1) {
-      this.logger.info('No NB_PASSED leads for ZeroBounce');
+      this.logger.info('No NB_PASSED leads for BounceBan');
       return { processed: 0, passed: 0, failed: 0 };
     }
 
-    const zbStopped = await this.budgetService.isHardStopped('zerobounce');
-    if (zbStopped) {
-      this.logger.warn('ZeroBounce budget exhausted, skipping batch');
+    const bbStopped = await this.budgetService.isHardStopped('bounceban');
+    if (bbStopped) {
+      this.logger.warn('BounceBan budget exhausted, skipping batch');
       return { processed: 0, passed: 0, failed: 0 };
     }
 
@@ -302,8 +312,8 @@ export class ValidationService {
     const emailToLead = new Map(leads.map((l) => [l.email?.toLowerCase(), l]));
 
     const results = await this.executeWithRetry(
-      () => this.runZbApi(emails),
-      'ZeroBounce batch',
+      () => this.runBbApi(emails),
+      'BounceBan batch',
     );
 
     if (!results) {
@@ -314,27 +324,26 @@ export class ValidationService {
       return { processed: leads.length, passed: 0, failed: leads.length };
     }
 
-    await this.budgetService.trackUsage('zerobounce', ZB_COST_PER_EMAIL * emails.length);
+    await this.budgetService.trackUsage('bounceban', BB_COST_PER_EMAIL * emails.length);
 
     let validCount = 0;
     let invalidCount = 0;
     const now = new Date();
 
-    for (const [email, zbResult] of results) {
+    for (const [email, bbResult] of results) {
       const lead = emailToLead.get(email.toLowerCase());
       if (!lead) continue;
 
-      const mapped = this.mapZbResultToStatus(zbResult.status, zbResult.subStatus);
-
-      await this.upsertCacheZb(email, mapped.enumValue, zbResult.subStatus);
+      const mapped = this.mapBbResultToStatus(bbResult);
+      await this.upsertCacheBb(email, mapped.enumValue, bbResult.score);
 
       await prisma.lead.update({
         where: { id: lead.id },
         data: {
           status: mapped.leadStatus,
-          zerobounceResult: mapped.enumValue,
-          zerobounceSubStatus: zbResult.subStatus || null,
-          isRoleBasedEmail: this.isRoleBasedEmail(email),
+          bouncebanResult: mapped.enumValue,
+          bouncebanScore: bbResult.score,
+          isRoleBasedEmail: bbResult.is_role || this.isRoleBasedEmail(email),
           validatedAt: now,
         },
       });
@@ -347,14 +356,13 @@ export class ValidationService {
       }
     }
 
-    // Handle leads whose emails weren't in the results (API didn't return them)
     for (const lead of leads) {
       if (!lead.email || results.has(lead.email.toLowerCase())) continue;
       await prisma.lead.update({
         where: { id: lead.id },
         data: {
           status: 'VALIDATED_VALID',
-          zerobounceResult: 'UNKNOWN',
+          bouncebanResult: 'UNKNOWN',
           validatedAt: now,
         },
       });
@@ -368,129 +376,134 @@ export class ValidationService {
 
     this.logger.info(
       { total: leads.length, valid: validCount, invalid: invalidCount },
-      'ZeroBounce batch completed',
+      'BounceBan batch completed',
     );
 
     return { processed: leads.length, passed: validCount, failed: invalidCount };
   }
 
-  private async runZbApi(
+  private async runBbApi(
     emails: string[],
-  ): Promise<Map<string, { status: string; subStatus: string }>> {
-    const apiKey = process.env.ZEROBOUNCE_API_KEY;
-    if (!apiKey) throw new Error('ZEROBOUNCE_API_KEY not set');
+  ): Promise<Map<string, BbEmailResult>> {
+    const apiKey = process.env.BOUNCEBAN_API_KEY;
+    if (!apiKey) throw new Error('BOUNCEBAN_API_KEY not set');
 
-    const csvLines = ['email_address', ...emails];
-    const csvBlob = new Blob([csvLines.join('\n')], { type: 'text/csv' });
-
-    const form = new FormData();
-    form.append('api_key', apiKey);
-    form.append('file', csvBlob, 'emails.csv');
-    form.append('email_address_column', '1');
-
-    const uploadRes = await fetch('https://bulkapi.zerobounce.net/v2/sendfile', {
+    const res = await fetch(`${BB_BASE_URL}/v1/verify/bulk`, {
       method: 'POST',
-      body: form,
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+      },
+      body: JSON.stringify({
+        emails,
+        greylisting_bypass: 'robust',
+      }),
       signal: AbortSignal.timeout(60_000),
     });
 
-    if (!uploadRes.ok) {
-      throw new Error(`ZB sendfile failed: ${uploadRes.status} ${await uploadRes.text()}`);
+    if (!res.ok) {
+      throw new Error(`BB bulk create failed: ${res.status} ${await res.text()}`);
     }
 
-    const uploadData = await uploadRes.json();
-    const fileId = uploadData.file_id;
-    this.logger.info({ fileId, emailCount: emails.length }, 'ZB batch file uploaded');
+    const data = await res.json();
+    const taskId: string = data.id;
+    this.logger.info({ taskId, emailCount: emails.length, credits: data.credits_remaining }, 'BB bulk task created');
 
-    await this.pollZbFile(apiKey, fileId);
-    return this.downloadZbResults(apiKey, fileId);
+    await this.pollBbTask(apiKey, taskId);
+    return this.downloadBbResults(apiKey, taskId);
   }
 
-  private async pollZbFile(apiKey: string, fileId: string): Promise<void> {
+  private async pollBbTask(apiKey: string, taskId: string): Promise<void> {
     const deadline = Date.now() + POLL_TIMEOUT_MS;
 
     while (Date.now() < deadline) {
-      const params = new URLSearchParams({ api_key: apiKey, file_id: fileId });
-      const res = await fetch(`https://bulkapi.zerobounce.net/v2/filestatus?${params}`, {
+      const params = new URLSearchParams({ id: taskId });
+      const res = await fetch(`${BB_BASE_URL}/v1/verify/bulk/status?${params}`, {
+        headers: { 'x-api-key': apiKey },
         signal: AbortSignal.timeout(15_000),
       });
 
-      if (!res.ok) throw new Error(`ZB filestatus failed: ${res.status}`);
+      if (!res.ok) throw new Error(`BB bulk/status failed: ${res.status}`);
 
       const data = await res.json();
-      const status = data.file_status?.toLowerCase();
+      const status = data.status?.toLowerCase();
 
-      if (status === 'complete') return;
-      if (status === 'failed' || status === 'deleted') {
-        throw new Error(`ZB file ${fileId} failed: ${JSON.stringify(data)}`);
+      if (status === 'finished') return;
+      if (status === 'failed' || status === 'error') {
+        throw new Error(`BB task ${taskId} failed: ${JSON.stringify(data)}`);
       }
 
-      this.logger.debug({ fileId, status: data.file_status }, 'ZB file still processing');
+      this.logger.debug(
+        { taskId, status, total: data.total_count, deliverable: data.deliverable_count },
+        'BB task still processing',
+      );
       await this.sleep(POLL_INTERVAL_MS);
     }
 
-    throw new Error(`ZB file ${fileId} timed out after ${POLL_TIMEOUT_MS / 1000}s`);
+    throw new Error(`BB task ${taskId} timed out after ${POLL_TIMEOUT_MS / 1000}s`);
   }
 
-  private async downloadZbResults(
+  private async downloadBbResults(
     apiKey: string,
-    fileId: string,
-  ): Promise<Map<string, { status: string; subStatus: string }>> {
-    const params = new URLSearchParams({ api_key: apiKey, file_id: fileId });
-    const res = await fetch(`https://bulkapi.zerobounce.net/v2/getfile?${params}`, {
-      signal: AbortSignal.timeout(60_000),
-    });
+    taskId: string,
+  ): Promise<Map<string, BbEmailResult>> {
+    const results = new Map<string, BbEmailResult>();
+    let cursor: string | null = null;
 
-    if (!res.ok) throw new Error(`ZB getfile failed: ${res.status}`);
+    do {
+      const params = new URLSearchParams({ id: taskId, page_size: '3000' });
+      if (cursor) params.set('cursor', cursor);
 
-    const results = new Map<string, { status: string; subStatus: string }>();
-    const text = await res.text();
-    const lines = text.trim().split('\n');
+      const res = await fetch(`${BB_BASE_URL}/v1/verify/bulk/dump?${params}`, {
+        headers: { 'x-api-key': apiKey },
+        signal: AbortSignal.timeout(60_000),
+      });
 
-    if (lines.length < 2) return results;
+      if (!res.ok) throw new Error(`BB bulk/dump failed: ${res.status}`);
 
-    const headers = this.parseCsvLine(lines[0]).map((h) => h.toLowerCase().trim());
-    const emailIdx = headers.findIndex((h) => h.includes('email'));
-    const statusIdx = headers.findIndex((h) => h === 'zb status' || h === 'status');
-    const subStatusIdx = headers.findIndex((h) => h === 'zb sub status' || h === 'sub_status' || h === 'sub status');
+      const data = await res.json();
+      cursor = data.cursor ?? null;
 
-    for (let i = 1; i < lines.length; i++) {
-      const cols = this.parseCsvLine(lines[i]);
-      const email = cols[emailIdx]?.trim().toLowerCase();
-      const zbStatus = cols[statusIdx]?.trim().toLowerCase() ?? 'unknown';
-      const zbSubStatus = cols[subStatusIdx]?.trim().toLowerCase() ?? '';
+      for (const item of data.items ?? []) {
+        if (!item.email) continue;
+        results.set(item.email.toLowerCase(), {
+          result: item.result,
+          score: item.score ?? -1,
+          is_disposable: item.is_disposable ?? false,
+          is_accept_all: item.is_accept_all ?? false,
+          is_role: item.is_role ?? false,
+          is_free: item.is_free ?? false,
+        });
+      }
+    } while (cursor);
 
-      if (email) results.set(email, { status: zbStatus, subStatus: zbSubStatus });
-    }
-
-    this.logger.info({ fileId, resultCount: results.size }, 'ZB results downloaded');
+    this.logger.info({ taskId, resultCount: results.size }, 'BB results downloaded');
     return results;
   }
 
-  private mapZbResultToStatus(
-    status: string,
-    subStatus: string,
-  ): {
+  private mapBbResultToStatus(bb: BbEmailResult): {
     leadStatus: 'VALIDATED_VALID' | 'VALIDATED_INVALID';
     enumValue: EmailValidationResult;
   } {
-    switch (status) {
-      case 'valid':
+    if (bb.is_disposable) {
+      return { leadStatus: 'VALIDATED_INVALID', enumValue: 'INVALID' };
+    }
+
+    switch (bb.result) {
+      case 'deliverable':
+        if (bb.is_accept_all) {
+          return { leadStatus: 'VALIDATED_VALID', enumValue: 'CATCH_ALL' };
+        }
         return { leadStatus: 'VALIDATED_VALID', enumValue: 'VALID' };
 
-      case 'invalid':
+      case 'undeliverable':
         return { leadStatus: 'VALIDATED_INVALID', enumValue: 'INVALID' };
 
-      case 'catch-all':
-        return { leadStatus: 'VALIDATED_VALID', enumValue: 'CATCH_ALL' };
-
-      case 'do_not_mail': {
-        const keepSubStatuses = ['role_based', 'role_based_catch_all'];
-        if (keepSubStatuses.includes(subStatus)) {
-          return { leadStatus: 'VALIDATED_VALID', enumValue: 'DO_NOT_MAIL_ROLE_BASED' };
+      case 'risky':
+        if (bb.score >= 50) {
+          return { leadStatus: 'VALIDATED_VALID', enumValue: 'CATCH_ALL' };
         }
         return { leadStatus: 'VALIDATED_INVALID', enumValue: 'INVALID' };
-      }
 
       case 'unknown':
       default:
@@ -504,7 +517,7 @@ export class ValidationService {
 
   private async checkCacheBatch(
     emails: string[],
-  ): Promise<Map<string, { neverbounce: string | null; zerobounce: string | null; subStatus: string | null }>> {
+  ): Promise<Map<string, { neverbounce: string | null; bounceban: string | null; bbScore: number | null }>> {
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     const cached = await prisma.emailValidationCache.findMany({
       where: {
@@ -513,13 +526,13 @@ export class ValidationService {
       },
     });
 
-    const map = new Map<string, { neverbounce: string | null; zerobounce: string | null; subStatus: string | null }>();
+    const map = new Map<string, { neverbounce: string | null; bounceban: string | null; bbScore: number | null }>();
     for (const c of cached) {
       if (c.neverbounce) {
         map.set(c.email, {
           neverbounce: c.neverbounce,
-          zerobounce: c.zerobounce,
-          subStatus: c.subStatus,
+          bounceban: c.bounceban,
+          bbScore: c.bbScore,
         });
       }
     }
@@ -538,19 +551,19 @@ export class ValidationService {
     }
   }
 
-  private async upsertCacheZb(
+  private async upsertCacheBb(
     email: string,
     result: EmailValidationResult,
-    subStatus?: string,
+    score?: number,
   ): Promise<void> {
     try {
       await prisma.emailValidationCache.upsert({
         where: { email },
-        update: { zerobounce: result, subStatus: subStatus ?? null, validatedAt: new Date() },
-        create: { email, zerobounce: result, subStatus: subStatus ?? null },
+        update: { bounceban: result, bbScore: score ?? null, validatedAt: new Date() },
+        create: { email, bounceban: result, bbScore: score ?? null },
       });
     } catch (err) {
-      this.logger.warn({ email, err }, 'Failed to upsert ZB cache');
+      this.logger.warn({ email, err }, 'Failed to upsert BB cache');
     }
   }
 
@@ -581,35 +594,6 @@ export class ValidationService {
       }
     }
     return null;
-  }
-
-  private parseCsvLine(line: string): string[] {
-    const result: string[] = [];
-    let current = '';
-    let inQuotes = false;
-
-    for (let i = 0; i < line.length; i++) {
-      const ch = line[i];
-      if (inQuotes) {
-        if (ch === '"' && line[i + 1] === '"') {
-          current += '"';
-          i++;
-        } else if (ch === '"') {
-          inQuotes = false;
-        } else {
-          current += ch;
-        }
-      } else if (ch === '"') {
-        inQuotes = true;
-      } else if (ch === ',') {
-        result.push(current);
-        current = '';
-      } else {
-        current += ch;
-      }
-    }
-    result.push(current);
-    return result;
   }
 
   private sleep(ms: number): Promise<void> {

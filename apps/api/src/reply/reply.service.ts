@@ -1,14 +1,18 @@
 import { Injectable } from '@nestjs/common';
 import Anthropic from '@anthropic-ai/sdk';
 import { prisma } from '@hyperscale/database';
-import { searchForAlternateContact } from '@hyperscale/exa';
+import { PERSONAS } from '@hyperscale/config';
 import { createLogger } from '../common/logger';
 import { BudgetService } from '../budget/budget.service';
+import { AlertService } from '../alert/alert.service';
 import { QueueService } from '../queues/queue.service';
-import { REPLY_CLASSIFICATION_PROMPT, RETURN_DATE_EXTRACTION_PROMPT } from './prompts';
+import { REPLY_CLASSIFICATION_PROMPT } from './prompts';
 
 const ANTHROPIC_MODEL = 'claude-sonnet-4-20250514';
 const CLASSIFICATION_LLM_COST = 0.002;
+
+const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+const MAX_DELAYED_MS = 90 * 24 * 60 * 60 * 1000;
 
 interface ClassificationResult {
   classification: string;
@@ -18,6 +22,13 @@ interface ClassificationResult {
   suggestedFollowUp?: string | null;
 }
 
+interface DraftReply {
+  subject: string;
+  body: string;
+  draftedAt: string;
+  classification: string;
+}
+
 @Injectable()
 export class ReplyService {
   private logger = createLogger('reply');
@@ -25,6 +36,7 @@ export class ReplyService {
 
   constructor(
     private readonly budgetService: BudgetService,
+    private readonly alertService: AlertService,
     private readonly queueService: QueueService,
   ) {
     this.anthropic = new Anthropic();
@@ -72,26 +84,27 @@ export class ReplyService {
       switch (result.classification) {
         case 'DIRECT_INTEREST':
           await this.handleDirectInterest(lead);
-          autoAction = 'calendly_response_sent';
+          autoAction = 'draft_reply_queued_for_review';
           break;
         case 'INTEREST_OBJECTION':
           await this.handleInterestObjection(lead);
-          autoAction = 'objection_response_sent';
+          autoAction = 'objection_draft_queued_for_review';
           break;
         case 'NOT_INTERESTED':
+          await this.handleNotInterested(lead);
           autoAction = 'marked_not_interested';
           break;
         case 'OUT_OF_OFFICE':
-          await this.handleOutOfOffice(lead, lead.replyText);
-          autoAction = 'sequence_paused_7_days';
+          await this.handleOutOfOffice(lead, lead.replyText, result.returnDate);
+          autoAction = 'resend_scheduled';
           break;
         case 'UNSUBSCRIBE':
           await this.handleUnsubscribe(lead);
-          autoAction = 'blocklist_updated';
+          autoAction = 'suppressed_and_removed';
           break;
         case 'AGGRESSIVE':
-          await this.handleUnsubscribe(lead);
-          autoAction = 'blocklist_updated_no_response';
+          await this.handleAggressive(lead);
+          autoAction = 'suppressed_flagged_for_review';
           break;
       }
     } catch (err) {
@@ -118,6 +131,51 @@ export class ReplyService {
       classification: result.classification,
       confidence: result.confidence,
       autoAction,
+    };
+  }
+
+  async processReply(payload: {
+    email: string;
+    body: string;
+    subject?: string;
+    campaignId?: string;
+    instantlyLeadId?: string;
+    timestamp?: string;
+  }): Promise<{ leadId: string; classification: string; confidence: number } | null> {
+    const lead = await prisma.lead.findFirst({
+      where: {
+        OR: [
+          { email: payload.email },
+          ...(payload.instantlyLeadId ? [{ instantlyLeadId: payload.instantlyLeadId }] : []),
+        ],
+      },
+    });
+
+    if (!lead) {
+      this.logger.warn({ email: payload.email }, 'Reply received for unknown lead');
+      return null;
+    }
+
+    const alreadyProcessed = lead.emailReplied && lead.replyClassification !== 'NOT_CLASSIFIED';
+    if (alreadyProcessed) {
+      this.logger.info({ leadId: lead.id }, 'Reply already processed, skipping');
+      return null;
+    }
+
+    await prisma.lead.update({
+      where: { id: lead.id },
+      data: {
+        emailReplied: true,
+        replyText: payload.body,
+      },
+    });
+
+    const result = await this.classifyReply(lead.id);
+
+    return {
+      leadId: lead.id,
+      classification: result.classification,
+      confidence: result.confidence,
     };
   }
 
@@ -171,9 +229,47 @@ export class ReplyService {
     }
   }
 
-  private async handleDirectInterest(lead: any): Promise<void> {
-    const slackWebhookUrl = process.env.SLACK_LEADGEN_REPLIES_WEBHOOK;
+  // ── DIRECT_INTEREST ──────────────────────────────────────────────
 
+  private async handleDirectInterest(lead: any): Promise<void> {
+    const shaul = PERSONAS.shaul;
+    const firstName = lead.firstName ?? 'there';
+    const subject = `Re: ${lead.companyName ?? 'Our conversation'}`;
+
+    const draft: DraftReply = {
+      subject,
+      body: [
+        `Hi ${firstName},`,
+        '',
+        `Great to hear from you! I'd love to learn more about ${lead.companyName} and see how we can help.`,
+        '',
+        `Here's a link to book a quick strategy session: ${shaul.calendlyUrl}`,
+        '',
+        `In the meantime, here's a quick overview of what we do: ${shaul.onePagerUrl}`,
+        '',
+        `Looking forward to connecting!`,
+        '',
+        shaul.signature,
+      ].join('\n'),
+      draftedAt: new Date().toISOString(),
+      classification: 'DIRECT_INTEREST',
+    };
+
+    await prisma.lead.update({
+      where: { id: lead.id },
+      data: { draftReply: draft as any },
+    });
+
+    await this.alertService.createAlert(
+      'HIGH',
+      'POSITIVE_REPLY',
+      `Direct interest from ${lead.companyName}`,
+      `${firstName} (${lead.email}) expressed direct interest. Draft reply created and queued for Shaul's review.`,
+      { leadId: lead.id, email: lead.email, companyName: lead.companyName, draftSubject: subject },
+      'Draft reply created, queued for human review',
+    );
+
+    const slackWebhookUrl = process.env.SLACK_LEADGEN_REPLIES_WEBHOOK;
     if (slackWebhookUrl) {
       try {
         await fetch(slackWebhookUrl, {
@@ -188,9 +284,10 @@ export class ReplyService {
                   type: 'mrkdwn',
                   text: [
                     `:fire: *Direct Interest - ${lead.companyName}*`,
-                    `*Contact:* ${lead.firstName ?? 'Unknown'} (${lead.email})`,
+                    `*Contact:* ${firstName} (${lead.email})`,
                     `*Source:* ${lead.source}`,
                     `*Reply:*\n>${(lead.replyText ?? '').slice(0, 500)}`,
+                    `*Draft reply ready for review*`,
                   ].join('\n'),
                 },
               },
@@ -207,110 +304,346 @@ export class ReplyService {
       data: {
         category: 'reply',
         action: 'direct_interest_detected',
-        reasoning: `Direct interest from ${lead.companyName} (${lead.email}) — Calendly link to be sent by Shaul`,
+        reasoning: `Direct interest from ${lead.companyName} (${lead.email}) — draft reply created with Calendly link, queued for Shaul's review`,
         inputContext: { leadId: lead.id, replyText: (lead.replyText ?? '').slice(0, 500) } as any,
-        outputResult: { slackNotified: !!slackWebhookUrl, calendlyPending: true } as any,
+        outputResult: { slackNotified: !!slackWebhookUrl, draftCreated: true, calendlyIncluded: true } as any,
       },
     });
   }
 
+  // ── INTEREST_OBJECTION ───────────────────────────────────────────
+
   private async handleInterestObjection(lead: any): Promise<void> {
+    const shaul = PERSONAS.shaul;
+    const firstName = lead.firstName ?? 'there';
+    const niche = lead.companyName ?? 'your';
+    const subject = `Re: ${lead.companyName ?? 'Our conversation'}`;
+
+    const draft: DraftReply = {
+      subject,
+      body: [
+        `Hi ${firstName},`,
+        '',
+        `Totally understand! Just to clarify — we're not trying to sell you anything on this call. It's purely a strategy session where we share some insights that have worked for similar ${niche} businesses.`,
+        '',
+        `No pressure at all, but if you're curious: ${shaul.calendlyUrl}`,
+        '',
+        `Best,`,
+        shaul.signature,
+      ].join('\n'),
+      draftedAt: new Date().toISOString(),
+      classification: 'INTEREST_OBJECTION',
+    };
+
+    await prisma.lead.update({
+      where: { id: lead.id },
+      data: { draftReply: draft as any },
+    });
+
+    await this.alertService.createAlert(
+      'MEDIUM',
+      'INTEREST_OBJECTION',
+      `Interest with objection from ${lead.companyName}`,
+      `${firstName} (${lead.email}) is interested but raised a concern. Draft objection-handling reply created for Shaul's review.`,
+      { leadId: lead.id, email: lead.email, companyName: lead.companyName, replySnippet: (lead.replyText ?? '').slice(0, 200) },
+      'Draft objection reply created, queued for human review',
+    );
+
     await prisma.paperclipAction.create({
       data: {
         category: 'reply',
         action: 'interest_objection_detected',
-        reasoning: `Interest with objection from ${lead.companyName} (${lead.email}) — deflection response to be sent by Shaul`,
+        reasoning: `Interest with objection from ${lead.companyName} (${lead.email}) — deflection response drafted, queued for Shaul's review`,
         inputContext: { leadId: lead.id, replyText: (lead.replyText ?? '').slice(0, 500) } as any,
-        outputResult: { objectionHandlingPending: true } as any,
+        outputResult: { draftCreated: true, objectionHandlingPending: true } as any,
       },
     });
   }
 
+  // ── NOT_INTERESTED ───────────────────────────────────────────────
+
+  private async handleNotInterested(lead: any): Promise<void> {
+    await prisma.lead.update({
+      where: { id: lead.id },
+      data: { status: 'REPLIED' },
+    });
+
+    if (lead.instantlyCampaignId && lead.email) {
+      await this.removeFromInstantlyCampaign(lead.email, lead.instantlyCampaignId);
+    }
+
+    await prisma.paperclipAction.create({
+      data: {
+        category: 'reply',
+        action: 'not_interested_processed',
+        reasoning: `Not interested reply from ${lead.email} (${lead.companyName}) — removed from campaign, status set to REPLIED`,
+        inputContext: { leadId: lead.id, email: lead.email } as any,
+        outputResult: { removedFromCampaign: !!lead.instantlyCampaignId, statusUpdated: 'REPLIED' } as any,
+      },
+    });
+  }
+
+  // ── OUT_OF_OFFICE ────────────────────────────────────────────────
+
+  private async handleOutOfOffice(lead: any, replyText: string, llmReturnDate?: string | null): Promise<void> {
+    let returnDate: Date | null = null;
+
+    if (llmReturnDate) {
+      const parsed = new Date(llmReturnDate);
+      if (!isNaN(parsed.getTime())) {
+        returnDate = parsed;
+      }
+    }
+
+    if (!returnDate) {
+      returnDate = this.extractReturnDateRegex(replyText);
+    }
+
+    let delayMs: number;
+    if (returnDate) {
+      const reEngageDate = new Date(returnDate);
+      reEngageDate.setDate(reEngageDate.getDate() + 1);
+      delayMs = Math.max(0, reEngageDate.getTime() - Date.now());
+    } else {
+      delayMs = SEVEN_DAYS_MS;
+    }
+
+    if (delayMs > 0 && delayMs < MAX_DELAYED_MS) {
+      await this.queueService.addJob(
+        'upload',
+        { leadId: lead.id, reEngage: true },
+        { delay: delayMs },
+      );
+    }
+
+    const reEngageDateStr = returnDate
+      ? new Date(returnDate.getTime() + 24 * 60 * 60 * 1000).toISOString()
+      : new Date(Date.now() + SEVEN_DAYS_MS).toISOString();
+
+    await prisma.paperclipAction.create({
+      data: {
+        category: 'reply',
+        action: 'out_of_office_processed',
+        reasoning: `OOO from ${lead.email} — re-engagement scheduled for ${reEngageDateStr.split('T')[0]}`,
+        inputContext: { leadId: lead.id, returnDateDetected: returnDate?.toISOString() ?? null } as any,
+        outputResult: { reEngageDate: reEngageDateStr, delayMs } as any,
+      },
+    });
+
+    this.logger.info(
+      { leadId: lead.id, returnDate: returnDate?.toISOString() ?? null, reEngageDate: reEngageDateStr },
+      'OOO processed, re-engagement scheduled',
+    );
+  }
+
+  private extractReturnDateRegex(text: string): Date | null {
+    const patterns = [
+      /(?:back|return(?:ing)?|available|in the office)\s+(?:on\s+)?(\w+\s+\d{1,2}(?:st|nd|rd|th)?,?\s*\d{0,4})/i,
+      /(?:back|return(?:ing)?|available)\s+(?:on\s+)?(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/i,
+      /(?:back|return(?:ing)?|available)\s+(?:on\s+)?(\d{4}-\d{2}-\d{2})/i,
+    ];
+
+    for (const pattern of patterns) {
+      const match = text.match(pattern);
+      if (match) {
+        const parsed = new Date(match[1]);
+        if (!isNaN(parsed.getTime()) && parsed > new Date()) {
+          return parsed;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  // ── UNSUBSCRIBE ──────────────────────────────────────────────────
+
   private async handleUnsubscribe(lead: any): Promise<void> {
+    if (lead.email) {
+      await this.addToSuppressionList(lead.email, 'UNSUBSCRIBE', lead.id);
+    }
+
+    await prisma.lead.update({
+      where: { id: lead.id },
+      data: { status: 'UNSUBSCRIBED' },
+    });
+
+    if (lead.email) {
+      await this.removeFromAllInstantlyCampaigns(lead.email);
+    }
+
     await prisma.paperclipAction.create({
       data: {
         category: 'reply',
         action: 'unsubscribe_processed',
-        reasoning: `Unsubscribe request from ${lead.email} (${lead.companyName})`,
+        reasoning: `Unsubscribe request from ${lead.email} (${lead.companyName}) — suppressed globally, removed from all campaigns`,
         inputContext: { leadId: lead.id, email: lead.email } as any,
-        outputResult: { suppressionAdded: true } as any,
+        outputResult: { suppressionAdded: true, removedFromCampaigns: true, statusUpdated: 'UNSUBSCRIBED' } as any,
       },
     });
 
-    if (lead.instantlyCampaignId) {
-      const apiKey = process.env.INSTANTLY_API_KEY;
-      if (apiKey) {
-        try {
-          await fetch('https://api.instantly.ai/api/v1/lead/delete', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${apiKey}`,
-            },
-            body: JSON.stringify({
-              api_key: apiKey,
-              campaign_id: lead.instantlyCampaignId,
-              delete_list: [lead.email],
-            }),
-            signal: AbortSignal.timeout(15_000),
-          });
-
-          this.logger.info(
-            { leadId: lead.id, email: lead.email },
-            'Lead removed from Instantly campaign',
-          );
-        } catch (err) {
-          this.logger.error({ leadId: lead.id, err }, 'Failed to remove lead from Instantly');
-        }
-      }
-    }
+    this.logger.info({ leadId: lead.id, email: lead.email }, 'Unsubscribe processed — compliance action logged');
   }
 
-  private async handleOutOfOffice(lead: any, replyText: string): Promise<void> {
+  // ── AGGRESSIVE ───────────────────────────────────────────────────
+
+  private async handleAggressive(lead: any): Promise<void> {
+    if (lead.email) {
+      await this.addToSuppressionList(lead.email, 'AGGRESSIVE', lead.id);
+    }
+
+    await prisma.lead.update({
+      where: { id: lead.id },
+      data: { status: 'UNSUBSCRIBED' },
+    });
+
+    if (lead.email) {
+      await this.removeFromAllInstantlyCampaigns(lead.email);
+    }
+
+    await this.alertService.createAlert(
+      'HIGH',
+      'AGGRESSIVE_REPLY',
+      `Aggressive reply from ${lead.companyName}`,
+      `${lead.email} sent an aggressive/hostile reply. Lead has been suppressed and removed from all campaigns. Flagged for review.`,
+      { leadId: lead.id, email: lead.email, companyName: lead.companyName, replySnippet: (lead.replyText ?? '').slice(0, 300) },
+      'Suppressed, removed from campaigns, flagged for review',
+    );
+
+    await prisma.paperclipAction.create({
+      data: {
+        category: 'reply',
+        action: 'aggressive_reply_processed',
+        reasoning: `Aggressive reply from ${lead.email} (${lead.companyName}) — suppressed, removed from all campaigns, alert created`,
+        inputContext: { leadId: lead.id, email: lead.email } as any,
+        outputResult: { suppressionAdded: true, removedFromCampaigns: true, alertCreated: true } as any,
+      },
+    });
+
+    this.logger.warn({ leadId: lead.id, email: lead.email }, 'Aggressive reply — lead suppressed and flagged');
+  }
+
+  // ── Instantly API helpers ────────────────────────────────────────
+
+  private async removeFromInstantlyCampaign(email: string, campaignId: string): Promise<void> {
+    const apiKey = process.env.INSTANTLY_API_KEY;
+    if (!apiKey) return;
+
     try {
-      const response = await this.anthropic.messages.create({
-        model: ANTHROPIC_MODEL,
-        max_tokens: 100,
-        temperature: 0,
-        system: RETURN_DATE_EXTRACTION_PROMPT,
-        messages: [{ role: 'user', content: replyText }],
+      const res = await fetch(`https://api.instantly.ai/api/v2/leads/${encodeURIComponent(email)}/status`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({ campaign_id: campaignId, status: 'completed' }),
+        signal: AbortSignal.timeout(15_000),
       });
 
-      await this.budgetService.trackUsage('anthropic', 0.001);
-
-      const text = response.content
-        .filter((block): block is Anthropic.TextBlock => block.type === 'text')
-        .map((block) => block.text)
-        .join('');
-
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        const parsed = JSON.parse(jsonMatch[0]);
-        if (parsed.returnDate) {
-          const returnDate = new Date(parsed.returnDate);
-          const reEngageDate = new Date(returnDate);
-          reEngageDate.setDate(reEngageDate.getDate() + 1);
-
-          const delayMs = Math.max(0, reEngageDate.getTime() - Date.now());
-
-          if (delayMs > 0 && delayMs < 90 * 24 * 60 * 60 * 1000) {
-            await this.queueService.addJob(
-              'upload',
-              { leadId: lead.id, reEngage: true },
-              { delay: delayMs },
-            );
-
-            this.logger.info(
-              { leadId: lead.id, returnDate: parsed.returnDate, reEngageDate: reEngageDate.toISOString() },
-              'OOO return date parsed, re-engagement scheduled',
-            );
-          }
-        }
+      if (!res.ok) {
+        this.logger.warn({ email, campaignId, status: res.status }, 'Instantly remove-from-campaign non-OK response');
+      } else {
+        this.logger.info({ email, campaignId }, 'Lead removed from Instantly campaign');
       }
     } catch (err) {
-      this.logger.warn({ leadId: lead.id, err }, 'Failed to parse OOO return date');
+      this.logger.error({ email, campaignId, err }, 'Failed to remove lead from Instantly campaign');
     }
   }
+
+  private async removeFromAllInstantlyCampaigns(email: string): Promise<void> {
+    const apiKey = process.env.INSTANTLY_API_KEY;
+    if (!apiKey) return;
+
+    const campaigns = await prisma.campaign.findMany({
+      where: { active: true, instantlyCampaignId: { not: null } },
+      select: { instantlyCampaignId: true },
+    });
+
+    for (const campaign of campaigns) {
+      if (campaign.instantlyCampaignId) {
+        await this.removeFromInstantlyCampaign(email, campaign.instantlyCampaignId);
+      }
+    }
+  }
+
+  private async addToSuppressionList(email: string, reason: string, leadId?: string): Promise<void> {
+    try {
+      await prisma.suppression.upsert({
+        where: { email },
+        create: { email, reason, source: leadId },
+        update: { reason },
+      });
+      this.logger.info({ email, reason }, 'Email added to suppression list');
+    } catch (err) {
+      this.logger.error({ email, reason, err }, 'Failed to add email to suppression list');
+    }
+  }
+
+  // ── Polling: fetch new replies from Instantly ────────────────────
+
+  async pollInstantlyReplies(campaignId: string): Promise<number> {
+    const apiKey = process.env.INSTANTLY_API_KEY;
+    if (!apiKey) {
+      this.logger.warn('No INSTANTLY_API_KEY — skipping reply poll');
+      return 0;
+    }
+
+    const campaign = await prisma.campaign.findUnique({
+      where: { id: campaignId },
+      select: { instantlyCampaignId: true },
+    });
+
+    if (!campaign?.instantlyCampaignId) {
+      this.logger.warn({ campaignId }, 'Campaign has no Instantly campaign ID');
+      return 0;
+    }
+
+    try {
+      const url = new URL('https://api.instantly.ai/api/v2/emails');
+      url.searchParams.set('campaign_id', campaign.instantlyCampaignId);
+      url.searchParams.set('email_type', 'reply');
+
+      const res = await fetch(url.toString(), {
+        headers: { Authorization: `Bearer ${apiKey}` },
+        signal: AbortSignal.timeout(30_000),
+      });
+
+      if (!res.ok) {
+        this.logger.error({ status: res.status, campaignId }, 'Instantly replies API error');
+        return 0;
+      }
+
+      const data = await res.json() as any;
+      const replies: any[] = data.data ?? data ?? [];
+      let processed = 0;
+
+      for (const reply of replies) {
+        const email = reply.from_email ?? reply.email ?? reply.lead_email;
+        const body = reply.body ?? reply.text ?? '';
+        const subject = reply.subject ?? '';
+
+        if (!email || !body) continue;
+
+        const result = await this.processReply({
+          email,
+          body,
+          subject,
+          campaignId: campaign.instantlyCampaignId,
+          timestamp: reply.timestamp ?? reply.created_at,
+        });
+
+        if (result) processed++;
+      }
+
+      this.logger.info({ campaignId, totalReplies: replies.length, processed }, 'Instantly reply poll completed');
+      return processed;
+    } catch (err) {
+      this.logger.error({ campaignId, err }, 'Failed to poll Instantly replies');
+      return 0;
+    }
+  }
+
+  // ── Existing query endpoints ─────────────────────────────────────
 
   async getReplies(filters: {
     classification?: string;
@@ -335,6 +668,7 @@ export class ReplyService {
         replyText: true,
         replyClassification: true,
         replyClassifiedAt: true,
+        draftReply: true,
         source: true,
         instantlyCampaignId: true,
       },
@@ -362,9 +696,14 @@ export class ReplyService {
         case 'INTEREST_OBJECTION':
           await this.handleInterestObjection(lead);
           break;
+        case 'NOT_INTERESTED':
+          await this.handleNotInterested(lead);
+          break;
         case 'UNSUBSCRIBE':
-        case 'AGGRESSIVE':
           await this.handleUnsubscribe(lead);
+          break;
+        case 'AGGRESSIVE':
+          await this.handleAggressive(lead);
           break;
         case 'OUT_OF_OFFICE':
           if (lead.replyText) {

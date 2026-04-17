@@ -15,6 +15,17 @@
     "db:migrate": "pnpm --filter @hyperscale-leads/database run migrate",
     "db:seed": "pnpm --filter @hyperscale-leads/database run seed"
   },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@swc/core",
+      "esbuild",
+      "@prisma/client",
+      "@prisma/engines",
+      "prisma",
+      "sharp",
+      "msgpackr-extract"
+    ]
+  },
   "devDependencies": {
     "@types/node": "^22.19.17",
     "eslint": "^10.2.0",

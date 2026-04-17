@@ -5,6 +5,8 @@ export {
   canActAutonomously,
   requiresConfirmation,
   requiresHumanApproval,
+  getMaxAdjustmentPct,
+  getMaxRetries,
 } from './authority';
 export {
   logAction,
@@ -18,6 +20,10 @@ export {
   runHourlyCycle,
   runDailyCycle,
   runWeeklyCycle,
+  morningAssessment,
+  middayCheck,
+  eveningWrap,
+  continuousMonitor,
 } from './cycles';
 export {
   postToChannel,

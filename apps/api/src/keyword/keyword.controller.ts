@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Param, Body, Query } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Patch, Param, Body, Query } from '@nestjs/common';
 import { KeywordService } from './keyword.service';
 import type { Source } from '@hyperscale/types';
 
@@ -19,13 +19,29 @@ export class KeywordController {
 
   @Post()
   async create(
-    @Body() body: { primary: string; source: Source; discoveredBy?: string },
+    @Body() body: { primary: string; source: Source; secondary?: string; discoveredBy?: string; labels?: string[] },
   ) {
     return this.keywordService.addKeyword(
       body.primary,
       body.source,
       body.discoveredBy,
+      body.secondary,
+      body.labels,
     );
+  }
+
+  @Put(':id')
+  async update(
+    @Param('id') id: string,
+    @Body() body: { primary?: string; secondary?: string; enabled?: boolean; labels?: string[] },
+  ) {
+    return this.keywordService.updateKeyword(id, body);
+  }
+
+  @Delete(':id')
+  async remove(@Param('id') id: string) {
+    await this.keywordService.deleteKeyword(id);
+    return { success: true };
   }
 
   @Patch(':id/toggle')

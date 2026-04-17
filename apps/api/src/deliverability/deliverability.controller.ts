@@ -1,12 +1,16 @@
 import { Controller, Get, Post, Param, Body, Query } from '@nestjs/common';
 import { DomainService } from './domain.service';
 import { InboxService } from './inbox.service';
+import { DeliverabilityStatsService } from './deliverability-stats.service';
+import { RotationService } from './rotation.service';
 
 @Controller('deliverability')
 export class DeliverabilityController {
   constructor(
     private readonly domainService: DomainService,
     private readonly inboxService: InboxService,
+    private readonly statsService: DeliverabilityStatsService,
+    private readonly rotationService: RotationService,
   ) {}
 
   @Get('domains')
@@ -69,5 +73,28 @@ export class DeliverabilityController {
   @Get('capacity')
   async getCapacity() {
     return this.inboxService.getCapacity();
+  }
+
+  @Get('overview')
+  async getOverview() {
+    return this.statsService.getOverview();
+  }
+
+  @Get('domains/:id/timeline')
+  async getDomainTimeline(
+    @Param('id') id: string,
+    @Query('days') days?: string,
+  ) {
+    return this.statsService.getDomainTimeline(id, days ? parseInt(days) : 30);
+  }
+
+  @Get('rotations')
+  async getRotationHistory(@Query('days') days?: string) {
+    return this.statsService.getRotationHistory(days ? parseInt(days) : 7);
+  }
+
+  @Get('rotation-candidates')
+  async getRotationCandidates() {
+    return this.rotationService.getRotationCandidates();
   }
 }

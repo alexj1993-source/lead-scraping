@@ -1,5 +1,5 @@
 import { ApifyClient } from 'apify-client';
-import { BaseAdapter, type AdapterResult, type LeadInput } from '../base.js';
+import { BaseAdapter, type AdapterResult, type LeadInput } from '../base';
 import { icpConfig } from '@hyperscale/config';
 
 const ACTOR_ID = 'apify~instagram-scraper';

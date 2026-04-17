@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Search, Filter, X } from 'lucide-react';
 import clsx from 'clsx';
 import { useLeads } from '@/lib/hooks';
+import { ApiErrorState, ApiEmptyState, ApiLoadingState } from '@/components/ui/api-state';
 
 interface Lead {
   id: string;
@@ -97,9 +98,9 @@ export default function LeadsPage() {
 
   const hasFilters = selectedSources.size > 0 || selectedStatuses.size > 0 || scoreRange[0] > 0 || scoreRange[1] < 100;
 
-  if (leadsQuery.isLoading) return <div className="p-8 text-center text-gray-400">Loading...</div>;
-  if (leadsQuery.isError) return <div className="p-8 text-center text-red-400">Failed to load data</div>;
-  if (!allLeads.length) return <div className="p-8 text-center text-gray-400">No data yet</div>;
+  if (leadsQuery.isLoading) return <ApiLoadingState />;
+  if (leadsQuery.isError) return <ApiErrorState onRetry={() => leadsQuery.refetch()} />;
+  if (!allLeads.length) return <ApiEmptyState title="No leads yet" description="Run your first pipeline to start generating leads." />;
 
   return (
     <div className="space-y-4 pb-20 md:pb-6">

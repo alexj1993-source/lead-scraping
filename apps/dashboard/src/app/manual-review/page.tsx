@@ -3,6 +3,7 @@
 import { Badge } from '@/components/ui/badge';
 import { AlertTriangle, Bot, CheckCircle, RotateCcw, Send, Inbox } from 'lucide-react';
 import { useManualReview } from '@/lib/hooks';
+import { ApiErrorState, ApiLoadingState } from '@/components/ui/api-state';
 
 interface ReviewItem {
   id: string;
@@ -24,8 +25,8 @@ export default function ManualReviewPage() {
   const reviewQuery = useManualReview();
   const reviewItems: ReviewItem[] = Array.isArray(reviewQuery.data) ? reviewQuery.data as ReviewItem[] : [];
 
-  if (reviewQuery.isLoading) return <div className="p-8 text-center text-gray-400">Loading...</div>;
-  if (reviewQuery.isError) return <div className="p-8 text-center text-red-400">Failed to load data</div>;
+  if (reviewQuery.isLoading) return <ApiLoadingState />;
+  if (reviewQuery.isError) return <ApiErrorState onRetry={() => reviewQuery.refetch()} />;
 
   return (
     <div className="space-y-6 pb-20 md:pb-6">
@@ -74,7 +75,7 @@ export default function ManualReviewPage() {
                 <div className="rounded-lg border border-primary/20 bg-primary/5 p-3">
                   <div className="flex items-center gap-1.5 mb-1">
                     <Bot className="h-3.5 w-3.5 text-primary-light" />
-                    <p className="text-xs font-medium text-primary-light">Paperclip&apos;s Recommendation</p>
+                    <p className="text-xs font-medium text-primary-light">Auto SDR&apos;s Recommendation</p>
                   </div>
                   <p className="text-sm text-text-secondary">{item.paperclipRecommendation}</p>
                 </div>

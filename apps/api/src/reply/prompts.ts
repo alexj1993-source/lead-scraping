@@ -15,11 +15,3 @@ OUTPUT FORMAT (JSON only):
   "reasoning": "<brief explanation>",
   "returnDate": "<ISO date if OUT_OF_OFFICE with return date, null otherwise>"
 }`;
-
-export const RETURN_DATE_EXTRACTION_PROMPT = `Extract the return date from this out-of-office reply. If a specific date is mentioned, return it in ISO format (YYYY-MM-DD). If only a relative timeframe is given (e.g. "next week", "in two weeks"), calculate from today's date. If no return date can be determined, return null.
-
-OUTPUT FORMAT (JSON only):
-{
-  "returnDate": "<ISO date string or null>",
-  "confidence": <0.0 to 1.0>
-}`;

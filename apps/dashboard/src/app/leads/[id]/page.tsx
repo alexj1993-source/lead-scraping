@@ -15,14 +15,15 @@ import {
   Trash2,
 } from 'lucide-react';
 import { useLead } from '@/lib/hooks';
+import { ApiErrorState, ApiLoadingState } from '@/components/ui/api-state';
 
 export default function LeadDetailPage() {
   const { id } = useParams();
   const router = useRouter();
   const leadQuery = useLead(id as string);
 
-  if (leadQuery.isLoading) return <div className="p-8 text-center text-gray-400">Loading...</div>;
-  if (leadQuery.isError) return <div className="p-8 text-center text-red-400">Failed to load data</div>;
+  if (leadQuery.isLoading) return <ApiLoadingState />;
+  if (leadQuery.isError) return <ApiErrorState onRetry={() => leadQuery.refetch()} />;
 
   const lead = leadQuery.data as any;
   if (!lead) return <div className="p-8 text-center text-gray-400">No data yet</div>;

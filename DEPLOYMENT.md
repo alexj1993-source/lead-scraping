@@ -154,7 +154,7 @@ This runs the full 9-step production deployment sequence (apps, database, migrat
 | Variable | Description |
 |----------|-------------|
 | `NEVERBOUNCE_API_KEY` | NeverBounce API key (primary validator) |
-| `ZEROBOUNCE_API_KEY` | ZeroBounce API key (secondary validator) |
+| `BOUNCEBAN_API_KEY` | BounceBan API key (catch-all email verification) |
 
 ### Outreach
 
@@ -320,7 +320,7 @@ BullMQ worker concurrency is configured per queue in `apps/api/src/queues/queue.
 |-------|---------------------|-------|
 | `enrich` | 5 | Rate-limited by enrichment provider APIs |
 | `score` | 10 | CPU-bound LLM calls |
-| `validate` | 10 | External API calls (NeverBounce, ZeroBounce) |
+| `validate` | 10 | External API calls (NeverBounce, BounceBan) |
 | `personalize` | 5 | LLM-heavy, most expensive step |
 | `upload` | 3 | Instantly API rate limits |
 

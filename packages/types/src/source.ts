@@ -1,4 +1,4 @@
-import type { Source, SourceTier, LeadInput } from './lead.js';
+import type { Source, SourceTier, LeadInput } from './lead';
 
 export interface ScrapeJobInput {
   keyword: string;

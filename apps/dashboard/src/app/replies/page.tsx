@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { MessageSquare, ChevronDown, Star, Clock } from 'lucide-react';
 import clsx from 'clsx';
 import { useReplies } from '@/lib/hooks';
+import { ApiErrorState, ApiEmptyState, ApiLoadingState } from '@/components/ui/api-state';
 
 type Classification = 'POSITIVE' | 'INTERESTED' | 'NEUTRAL' | 'NOT_INTERESTED' | 'OUT_OF_OFFICE' | 'UNSUBSCRIBE';
 
@@ -37,9 +38,9 @@ export default function RepliesPage() {
   const [filterClass, setFilterClass] = useState<Classification | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  if (repliesQuery.isLoading) return <div className="p-8 text-center text-gray-400">Loading...</div>;
-  if (repliesQuery.isError) return <div className="p-8 text-center text-red-400">Failed to load data</div>;
-  if (!replies.length) return <div className="p-8 text-center text-gray-400">No data yet</div>;
+  if (repliesQuery.isLoading) return <ApiLoadingState />;
+  if (repliesQuery.isError) return <ApiErrorState onRetry={() => repliesQuery.refetch()} />;
+  if (!replies.length) return <ApiEmptyState title="No replies yet" description="Replies will appear here once leads respond to your campaigns." />;
 
   const filtered = filterClass ? replies.filter((r) => r.classification === filterClass) : replies;
   const positiveReplies = filtered.filter((r) => r.classification === 'POSITIVE');

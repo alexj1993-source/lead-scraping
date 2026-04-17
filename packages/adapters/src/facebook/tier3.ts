@@ -1,4 +1,4 @@
-import { BaseAdapter, type AdapterResult } from '../base.js';
+import { BaseAdapter, type AdapterResult } from '../base';
 
 export class FacebookTier3Adapter extends BaseAdapter {
   constructor() {

@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import clsx from 'clsx';
 import { useProviderSettings } from '@/lib/hooks';
+import { ApiErrorState, ApiLoadingState } from '@/components/ui/api-state';
 import { apiFetch } from '@/lib/api';
 
 interface ProviderInfo {
@@ -42,13 +43,13 @@ interface TestResult {
 
 const providerIcons: Record<string, React.ReactNode> = {
   neverbounce: <Mail className="h-4 w-4" />,
-  zerobounce: <Mail className="h-4 w-4" />,
+  bounceban: <Mail className="h-4 w-4" />,
   instantly: <Mail className="h-4 w-4" />,
   anthropic: <Bot className="h-4 w-4" />,
   apollo: <Users className="h-4 w-4" />,
   snovio: <Search className="h-4 w-4" />,
   exa: <Search className="h-4 w-4" />,
-  meta: <Share2 className="h-4 w-4" />,
+  apify: <Share2 className="h-4 w-4" />,
   hetrixtools: <Shield className="h-4 w-4" />,
   getprospect: <Users className="h-4 w-4" />,
   lusha: <Database className="h-4 w-4" />,
@@ -58,7 +59,7 @@ const providerIcons: Record<string, React.ReactNode> = {
 const providerCategories: { title: string; providers: string[] }[] = [
   {
     title: 'Email Validation',
-    providers: ['neverbounce', 'zerobounce'],
+    providers: ['neverbounce', 'bounceban'],
   },
   {
     title: 'Email Infrastructure',
@@ -73,8 +74,8 @@ const providerCategories: { title: string; providers: string[] }[] = [
     providers: ['anthropic', 'openai', 'exa'],
   },
   {
-    title: 'Social Platforms',
-    providers: ['meta'],
+    title: 'Scraping',
+    providers: ['apify'],
   },
 ];
 
@@ -260,14 +261,8 @@ export default function SettingsPage() {
     ? (providersQuery.data as ProviderInfo[])
     : [];
 
-  if (providersQuery.isLoading)
-    return <div className="p-8 text-center text-gray-400">Loading...</div>;
-  if (providersQuery.isError)
-    return (
-      <div className="p-8 text-center text-red-400">
-        Failed to load settings
-      </div>
-    );
+  if (providersQuery.isLoading) return <ApiLoadingState />;
+  if (providersQuery.isError) return <ApiErrorState onRetry={() => providersQuery.refetch()} />;
 
   const hasVaultWarning = providers.some((p) => p.vaultWarning);
   const configuredCount = providers.filter((p) => p.configured).length;

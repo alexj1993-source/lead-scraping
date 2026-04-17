@@ -5,7 +5,7 @@ import { createLogger } from '../common/logger';
 
 const logger = createLogger('keyword-score-processor');
 
-@Processor('keyword:score')
+@Processor('keyword-score')
 export class KeywordScoreProcessor extends WorkerHost {
   constructor(private readonly keywordService: KeywordService) {
     super();

@@ -8,8 +8,8 @@ const logger = pino({ name: 'scraper' });
 const REDIS_URL = process.env.REDIS_URL ?? 'redis://localhost:6379';
 
 const SCRAPE_QUEUES = [
-  'scrape:facebook',
-  'scrape:instagram',
+  'scrape-facebook',
+  'scrape-instagram',
 ] as const;
 
 async function main() {
@@ -66,7 +66,7 @@ async function main() {
 
   const reauthWorker = createReauthWorker(redis);
   workers.push(reauthWorker);
-  logger.info({ queue: 'session:auto-reauth' }, 'Registered reauth worker');
+  logger.info({ queue: 'session-auto-reauth' }, 'Registered reauth worker');
 
   logger.info(
     { workers: workers.length },

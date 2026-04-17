@@ -6,6 +6,7 @@ import { DataTable, type Column } from '@/components/ui/data-table';
 import { Bot, CheckCircle, XCircle, Tag, Power } from 'lucide-react';
 import clsx from 'clsx';
 import { useKeywords } from '@/lib/hooks';
+import { ApiErrorState, ApiEmptyState, ApiLoadingState } from '@/components/ui/api-state';
 
 interface Keyword {
   id: string;
@@ -99,9 +100,9 @@ export default function KeywordsPage() {
     },
   ];
 
-  if (keywordsQuery.isLoading) return <div className="p-8 text-center text-gray-400">Loading...</div>;
-  if (keywordsQuery.isError) return <div className="p-8 text-center text-red-400">Failed to load data</div>;
-  if (!keywords.length && !proposedKeywords.length) return <div className="p-8 text-center text-gray-400">No data yet</div>;
+  if (keywordsQuery.isLoading) return <ApiLoadingState />;
+  if (keywordsQuery.isError) return <ApiErrorState onRetry={() => keywordsQuery.refetch()} />;
+  if (!keywords.length && !proposedKeywords.length) return <ApiEmptyState title="No keywords yet" description="Add keywords in Sources to start scraping." />;
 
   return (
     <div className="space-y-6 pb-20 md:pb-6">
@@ -117,7 +118,7 @@ export default function KeywordsPage() {
         <section className="rounded-xl border border-primary/20 bg-primary/5 p-4 space-y-3">
           <div className="flex items-center gap-2">
             <Bot className="h-4 w-4 text-primary-light" />
-            <span className="text-sm font-medium text-primary-light">Paperclip Suggestions</span>
+            <span className="text-sm font-medium text-primary-light">Auto SDR Suggestions</span>
           </div>
           {proposedKeywords.map((pk, i) => (
             <div key={i} className="flex items-center justify-between gap-4 rounded-lg bg-surface-light p-3">

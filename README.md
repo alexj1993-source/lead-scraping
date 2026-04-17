@@ -91,7 +91,7 @@ lead-scraping/
 │   │       ├── enrichment/     Waterfall enrichment processor
 │   │       ├── scoring/        ICP scoring with Exa verification
 │   │       ├── dedup/          Fuzzy + exact deduplication
-│   │       ├── validation/     NeverBounce + ZeroBounce
+│   │       ├── validation/     NeverBounce + BounceBan
 │   │       ├── personalization/ AI copy generation
 │   │       ├── upload/         Instantly campaign upload
 │   │       ├── reply/          Reply sync + classification
@@ -147,7 +147,7 @@ lead-scraping/
 | AI | Anthropic Claude (via Paperclip CMO), Exa web search |
 | Scraping | Playwright, Apify, PhantomBuster, BrightData proxies |
 | Enrichment | Apollo, Lusha, GetProspect, Snov.io (waterfall) |
-| Validation | NeverBounce + ZeroBounce (dual) |
+| Validation | NeverBounce + BounceBan (dual, catch-all verification) |
 | Outreach | Instantly |
 | Telephony | Twilio (for session 2FA) |
 

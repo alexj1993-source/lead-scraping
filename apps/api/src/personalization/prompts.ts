@@ -1,24 +1,28 @@
-export const PERSONALIZATION_SYSTEM_PROMPT = `You write cold email personalization for a lead generation agency. Your job is to create an icebreaker, angle, and subject line for each lead.
+export function buildLeadMagnetPrompt(input: {
+  title: string;
+  h1: string;
+  description: string;
+  companyName: string;
+  landingPageUrl: string;
+}): string {
+  return `You are writing a personalization variable for a cold email. The variable will be inserted into this sentence:
+"I just came across {{Lead Magnet}} and thought it was really well done."
 
-VOICE RULES (MANDATORY):
-- Short sentences. Punchy.
-- You can start sentences with "And" or "But".
-- NEVER use em dashes (—). Use periods or commas instead.
-- NEVER use "not X, but Y" constructions.
-- NEVER use: "unlock your potential", "take your business to the next level", "game-changer", "revolutionary", "cutting-edge", "synergy", "leverage", "paradigm shift", "thought leader", "guru"
-- Lead with the reader's world, not yours.
-- Reference something SPECIFIC about them: their lead magnet, recent content, a specific detail from their landing page or web presence.
-- Sound like a real person who did 30 seconds of research, not a marketer.
+Based on the following landing page information, write a natural, conversational description of what this person offers:
 
-OUTPUT FORMAT (JSON only):
-{
-  "icebreaker": "<1-2 sentences. Reference something specific about them. Be genuine.>",
-  "angle": "<The angle/hook for the email. What value are you offering that connects to their world?>",
-  "subjectLine": "<Short, curiosity-driven. 3-8 words. No clickbait. Lowercase okay.>"
-}`;
+Landing page title: ${input.title}
+Landing page H1: ${input.h1}
+Landing page description: ${input.description}
+Company/Person name: ${input.companyName}
+URL: ${input.landingPageUrl}
 
-export const VARIANT_A_SUPPLEMENT = `Focus your icebreaker on their lead magnet / webinar / training. What is it about? Why does it stand out?`;
+Rules:
+- Start with "your" or "the"
+- Maximum 15 words
+- Lowercase, no quotes
+- Sound natural when read in the sentence above
+- Be specific to what they actually offer (mention the format: webinar, challenge, masterclass, course, etc.)
+- If you can't determine what they offer, use a generic fallback like "your training program for coaches"
 
-export const VARIANT_B_SUPPLEMENT = `Focus your icebreaker on their recent activity: podcast appearances, blog posts, launches, or media mentions. If no recent activity data is available, focus on something unique about their business approach.`;
-
-export const VARIANT_C_SUPPLEMENT = `Focus your icebreaker on industry trends or peer comparison. Reference what others in their niche are doing and why their approach is different or notable.`;
+Respond with ONLY the personalization text, nothing else.`;
+}

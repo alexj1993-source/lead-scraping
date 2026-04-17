@@ -12,7 +12,7 @@
  * 2. Enrich (waterfall + Exa fallback)
  * 3. ICP Score (with Exa verification for borderline)
  * 4. Deduplicate
- * 5. Validate email (NeverBounce + ZeroBounce)
+ * 5. Validate email (NeverBounce + BounceBan)
  * 6. Personalize (with Exa context + quality gates)
  * 7. Upload to Instantly test campaign
  * 8. Generate Phase 0 quality report
@@ -186,7 +186,7 @@ async function getCostBreakdown(): Promise<CostBreakdown> {
         costs.personalization += usage * 0.6;
         break;
       case 'neverbounce':
-      case 'zerobounce':
+      case 'bounceban':
         costs.validation += usage;
         break;
       case 'exa':

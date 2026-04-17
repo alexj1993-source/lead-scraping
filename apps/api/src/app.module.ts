@@ -25,6 +25,8 @@ import { CampaignModule } from './campaign/campaign.module';
 import { ScraperModule } from './scraper/scraper.module';
 import { DeliverabilityModule } from './deliverability/deliverability.module';
 import { SettingsModule } from './settings/settings.module';
+import { ManualReviewModule } from './manual-review/manual-review.module';
+import { QaModule } from './qa/qa.module';
 
 @Module({
   imports: [
@@ -60,6 +62,8 @@ import { SettingsModule } from './settings/settings.module';
     ScraperModule,
     DeliverabilityModule,
     SettingsModule,
+    ManualReviewModule,
+    QaModule,
   ],
 })
 export class AppModule {}

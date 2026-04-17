@@ -5,7 +5,7 @@ import { createLogger } from '../common/logger';
 
 const logger = createLogger('reply-classify-processor');
 
-@Processor('reply:classify')
+@Processor('reply-classify')
 export class ReplyClassifyProcessor extends WorkerHost {
   constructor(private readonly replyService: ReplyService) {
     super();

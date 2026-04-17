@@ -295,7 +295,7 @@ function randomDelay(minMs: number, maxMs: number): Promise<void> {
 // ---------------------------------------------------------------------------
 
 export function createReauthWorker(redis: IORedis): Worker {
-  return new Worker('session:auto-reauth', handleReauth, {
+  return new Worker('session-auto-reauth', handleReauth, {
     connection: redis,
     concurrency: 1,
     limiter: { max: 3, duration: 300_000 },
